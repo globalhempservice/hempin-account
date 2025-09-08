@@ -1,0 +1,6 @@
+{
+    "projectName": "hempin-account",
+    "defaultBranch": "main",
+    "devCommand": "npm run dev",
+    "devPort": 3002
+  }
