@@ -1,0 +1,7 @@
+[build]
+  command = "npm run build"
+  publish = ".next"
+  environment = ["NEXT_PUBLIC_SITE_ENV", "SUPABASE_URL", "SUPABASE_SERVICE_ROLE_KEY"]
+
+[[plugins]]
+  package = "@netlify/plugin-nextjs"
