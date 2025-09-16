@@ -1,60 +1,59 @@
-import { NextResponse } from 'next/server';
-import { supabaseAdmin } from '@/ui/lib/supabaseServer';
+'use client';
 
-async function lookupToken(token: string) {
-  const db = supabaseAdmin();
+import { useEffect, useState } from 'react';
 
-  const { data, error } = await db
-    .from('handoff_tokens')
-    .select('id, email, campaign_slug, profile_id, expires_at, consumed_at')
-    .eq('id', token)
-    .single();
+export default function RedeemHandoffPage() {
+  const [msg, setMsg] = useState('Redeeming your handoff…');
 
-  if (error || !data) {
-    return NextResponse.json({ ok: false, error: 'Invalid token' }, { status: 404 });
-  }
-  if (data.consumed_at) {
-    return NextResponse.json({ ok: false, error: 'Token already used' }, { status: 400 });
-  }
-  if (new Date(data.expires_at).getTime() < Date.now()) {
-    return NextResponse.json({ ok: false, error: 'Token expired' }, { status: 400 });
-  }
+  useEffect(() => {
+    const url = new URL(window.location.href);
+    const token = (url.searchParams.get('token') || url.searchParams.get('ht') || '').trim();
 
-  // Do NOT consume yet (we’ll consume after the session is established)
-  return NextResponse.json({
-    ok: true,
-    email: data.email,
-    campaignSlug: data.campaign_slug,
-    fundUnlocked: true,
-    profileId: data.profile_id,
-  });
-}
-
-// GET /api/handoff/redeem?token=...   (preferred)
-export async function GET(req: Request) {
-  try {
-    const url = new URL(req.url);
-    const token =
-      (url.searchParams.get('token') || url.searchParams.get('ht') || '').trim();
     if (!token) {
-      return NextResponse.json({ ok: false, error: 'Missing token' }, { status: 400 });
+      setMsg('Missing handoff token.');
+      return;
     }
-    return await lookupToken(token);
-  } catch (e: any) {
-    return NextResponse.json({ ok: false, error: e?.message ?? 'Server error' }, { status: 500 });
-  }
-}
 
-// POST /api/handoff/redeem  body: { token: string }   (also supported)
-export async function POST(req: Request) {
-  try {
-    const body = await req.json().catch(() => ({}));
-    const token = (body?.token || '').trim();
-    if (!token) {
-      return NextResponse.json({ ok: false, error: 'Missing token' }, { status: 400 });
-    }
-    return await lookupToken(token);
-  } catch (e: any) {
-    return NextResponse.json({ ok: false, error: e?.message ?? 'Server error' }, { status: 500 });
-  }
+    (async () => {
+      try {
+        const res = await fetch(`/api/handoff/redeem?token=${encodeURIComponent(token)}`);
+        const json = await res.json();
+
+        if (!res.ok || !json?.ok) {
+          throw new Error(json?.error || 'Failed to redeem handoff.');
+        }
+
+        // Store a lightweight snapshot for the next screen
+        const snapshot = {
+          profileId: json.profileId ?? null,
+          email: json.email ?? null,
+          leafTotal: json.leafTotal ?? 0,
+          perks: json.perks ?? [],
+          unlocked: { fund: !!json.fundUnlocked },
+        };
+        sessionStorage.setItem('hempin.account.profile', JSON.stringify(snapshot));
+
+        // Off we go
+        window.location.replace('/nebula?welcome=1');
+      } catch (e: any) {
+        setMsg(e?.message ?? 'Something went wrong.');
+      }
+    })();
+  }, []);
+
+  return (
+    <main className="min-h-screen flex items-center justify-center px-6">
+      <div className="max-w-md w-full text-center">
+        <h1 className="text-2xl font-semibold">Finishing up…</h1>
+        <p className="mt-3 opacity-80">{msg}</p>
+        <p className="mt-6 text-xs opacity-60">
+          If this takes too long, you can{' '}
+          <a className="underline" href="/">
+            return to account home
+          </a>
+          .
+        </p>
+      </div>
+    </main>
+  );
 }

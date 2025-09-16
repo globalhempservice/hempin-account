@@ -8,6 +8,7 @@ export default function RedeemHandoffPage() {
   useEffect(() => {
     const url = new URL(window.location.href);
     const token = (url.searchParams.get('token') || url.searchParams.get('ht') || '').trim();
+    const src = (url.searchParams.get('src') || '').trim(); // pass through (e.g. market)
 
     if (!token) {
       setMsg('Missing handoff token.');
@@ -16,25 +17,32 @@ export default function RedeemHandoffPage() {
 
     (async () => {
       try {
-        const res = await fetch(`/api/handoff/redeem?token=${encodeURIComponent(token)}`);
+        const qs = new URLSearchParams();
+        qs.set('ht', token);
+        if (src) qs.set('src', src);
+
+        const res = await fetch(`/api/handoff/redeem?${qs.toString()}`);
         const json = await res.json();
 
         if (!res.ok || !json?.ok) {
           throw new Error(json?.error || 'Failed to redeem handoff.');
         }
 
-        // Store a lightweight snapshot for the next screen
+        // Store snapshot for Nebula
         const snapshot = {
           profileId: json.profileId ?? null,
           email: json.email ?? null,
-          leafTotal: json.leafTotal ?? 0,
+          leafTotal: typeof json.leafTotal === 'number' ? json.leafTotal : 0,
           perks: json.perks ?? [],
-          unlocked: { fund: !!json.fundUnlocked },
+          unlocked: {
+            fund: !!json.fundUnlocked,
+            market: !!json.marketUnlocked,
+          },
         };
         sessionStorage.setItem('hempin.account.profile', JSON.stringify(snapshot));
 
-        // Off we go
-        window.location.replace('/nebula?welcome=1');
+        // Go to Nebula
+        window.location.replace('/nebula?welcome=token');
       } catch (e: any) {
         setMsg(e?.message ?? 'Something went wrong.');
       }

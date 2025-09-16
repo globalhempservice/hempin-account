@@ -77,7 +77,13 @@ export default function NebulaPage() {
           <UniverseCard title="Brand" />
           <UniverseCard title="Factory" />
           <UniverseCard title="Knowledge" />
-          <UniverseCard title="Shop" />
+          // inside the grid, next to Fund
+<UniverseCard
+  title="Market"
+  unlocked={!!data?.unlocked?.market}
+  accent="from-emerald-400/40 to-teal-400/20"
+  onClick={() => alert('Market universe — WIP')}
+/>
         </div>
 
         {/* CTA row */}
