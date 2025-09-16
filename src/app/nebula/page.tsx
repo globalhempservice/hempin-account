@@ -9,7 +9,8 @@ type Snapshot = {
   email: string | null;
   leafTotal: number;
   perks: any[];
-  unlocked: { fund?: boolean 
+  unlocked: {
+    fund?: boolean;
     market?: boolean;
   };
 };
@@ -25,7 +26,6 @@ export default function NebulaPage() {
       const snap = JSON.parse(raw) as Snapshot;
       setData(snap);
 
-      // Trigger a short celebration if Fund is unlocked
       if (snap?.unlocked?.fund) {
         setCelebrateFund(true);
         const t = setTimeout(() => setCelebrateFund(false), 3000);
@@ -59,9 +59,7 @@ export default function NebulaPage() {
         <div className="mt-6 flex justify-center">
           <div className="inline-flex items-center gap-2 rounded-full border border-white/15 bg-white/5 px-3 py-1.5 text-xs">
             <span className="opacity-80">Leaf XP</span>
-            <span className="rounded-full bg-emerald-500/20 px-2 py-0.5 text-emerald-300">
-              +{leaf}
-            </span>
+            <span className="rounded-full bg-emerald-500/20 px-2 py-0.5 text-emerald-300">+{leaf}</span>
           </div>
         </div>
 
@@ -74,18 +72,21 @@ export default function NebulaPage() {
             onClick={() => alert('Fund universe — perks & receipts (WIP)')}
           />
 
+          {/* Market — sits next to Fund */}
+          <UniverseCard
+            title="Market"
+            unlocked={!!data?.unlocked?.market}
+            accent="from-emerald-400/40 to-teal-400/20"
+            badge={data?.unlocked?.market ? 'New' : undefined}
+            onClick={() => alert('Market universe — WIP')}
+          />
+
           {/* Others locked for now */}
           <UniverseCard title="Farm" />
           <UniverseCard title="Brand" />
           <UniverseCard title="Factory" />
           <UniverseCard title="Knowledge" />
-          // inside the grid, next to Fund
-<UniverseCard
-  title="Market"
-  unlocked={!!data?.unlocked?.market}
-  accent="from-emerald-400/40 to-teal-400/20"
-  onClick={() => alert('Market universe — WIP')}
-/>
+          <UniverseCard title="Shop" />
         </div>
 
         {/* CTA row */}
@@ -121,7 +122,6 @@ function FundUniverseCard({
   celebrate: boolean;
   onClick?: () => void;
 }) {
-  // pink/fuchsia glow + subtle pulse
   return (
     <button
       onClick={unlocked ? onClick : undefined}
@@ -131,12 +131,17 @@ function FundUniverseCard({
           : 'border-white/10 bg-black/20 opacity-70 cursor-not-allowed'
       }`}
     >
+      {/* Badge (mobile-safe) */}
+      {unlocked && (
+        <span className="absolute top-3 right-3 rounded-full border border-emerald-400/40 bg-emerald-500/20 px-2 py-0.5 text-emerald-200 text-[11px] leading-none shadow-sm">
+          New
+        </span>
+      )}
+
       <div className="flex items-center gap-4">
         {/* Orb avatar */}
         <div className="relative h-12 w-12 shrink-0">
-          {/* base orb */}
           <div className="absolute inset-0 rounded-full bg-gradient-to-br from-pink-400/70 to-fuchsia-400/50 ring-1 ring-white/10" />
-          {/* inner pulse ring when unlocked */}
           {unlocked && (
             <>
               <div className="absolute inset-0 rounded-full animate-[ping_2.4s_ease-out_infinite] bg-fuchsia-400/20" />
@@ -147,19 +152,10 @@ function FundUniverseCard({
 
         <div>
           <div className="text-sm opacity-80">Fund</div>
-          <div className="text-xs opacity-60 mt-1">
-            {unlocked ? 'Unlocked' : 'Locked — coming soon'}
-          </div>
+          <div className="text-xs opacity-60 mt-1">{unlocked ? 'Unlocked' : 'Locked — coming soon'}</div>
         </div>
-
-        {unlocked && (
-          <div className="ml-auto rounded-full border border-white/15 bg-emerald-500/20 px-2 py-0.5 text-emerald-300 text-[11px]">
-            New
-          </div>
-        )}
       </div>
 
-      {/* Celebration sparkles (brief on first load after handoff) */}
       {unlocked && celebrate && <Sparkles />}
     </button>
   );
@@ -178,9 +174,9 @@ function Sparkles() {
       `}</style>
       <div className="pointer-events-none absolute inset-0">
         {Array.from({ length: 14 }).map((_, i) => {
-          const left = 6 + (i * 6.5) % 86; // scatter horizontally
-          const delay = (i % 7) * 120; // stagger
-          const size = 3 + (i % 3); // 3-5px
+          const left = 6 + ((i * 6.5) % 86);
+          const delay = (i % 7) * 120;
+          const size = 3 + (i % 3);
           return (
             <span
               key={i}
@@ -203,17 +199,19 @@ function Sparkles() {
   );
 }
 
-/* ────────────────────────────── Generic locked card ──────────────────────────── */
+/* ────────────────────────────── Generic card ──────────────────────────── */
 
 function UniverseCard({
   title,
   unlocked = false,
   accent = 'from-slate-400/40 to-slate-500/20',
+  badge,
   onClick,
 }: {
   title: string;
   unlocked?: boolean;
   accent?: string;
+  badge?: string;
   onClick?: () => void;
 }) {
   return (
@@ -223,13 +221,16 @@ function UniverseCard({
         unlocked ? 'bg-white/5 hover:bg-white/10' : 'bg-black/20 opacity-70 cursor-not-allowed'
       }`}
     >
-      <div className="mb-3 h-10 w-10 rounded-full bg-gradient-to-br ring-1 ring-white/10" style={{ backgroundImage: undefined, background: undefined }}>
+      {badge && (
+        <span className="absolute top-3 right-3 rounded-full border border-emerald-400/40 bg-emerald-500/20 px-2 py-0.5 text-emerald-200 text-[11px] leading-none shadow-sm">
+          {badge}
+        </span>
+      )}
+      <div className="mb-3 h-10 w-10 rounded-full bg-gradient-to-br ring-1 ring-white/10">
         <div className={`h-10 w-10 rounded-full bg-gradient-to-br ${accent}`} />
       </div>
       <div className="text-sm opacity-80">{title}</div>
-      <div className="text-xs opacity-60 mt-1">
-        {unlocked ? 'Unlocked' : 'Locked — coming soon'}
-      </div>
+      <div className="text-xs opacity-60 mt-1">{unlocked ? 'Unlocked' : 'Locked — coming soon'}</div>
     </button>
   );
 }
