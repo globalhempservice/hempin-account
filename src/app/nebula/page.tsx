@@ -9,7 +9,9 @@ type Snapshot = {
   email: string | null;
   leafTotal: number;
   perks: any[];
-  unlocked: { fund?: boolean };
+  unlocked: { fund?: boolean 
+    market?: boolean;
+  };
 };
 
 export default function NebulaPage() {
