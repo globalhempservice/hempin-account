@@ -9,33 +9,74 @@ type RedeemPayload = {
   campaignSlug?: string;
   fundUnlocked?: boolean;
   profileId?: string;
+  leafTotal?: number;
   error?: string;
 };
 
 export default function Welcome() {
-  const handoffId = useMemo(() => {
-    if (typeof window === 'undefined') return '';
-    return new URLSearchParams(window.location.search).get('ht') || '';
+  const params = useMemo(() => {
+    if (typeof window === 'undefined') return new URLSearchParams();
+    return new URLSearchParams(window.location.search);
   }, []);
+
+  const ht = params.get('ht') || params.get('token') || '';
+  const emailParam = params.get('email') || '';
+  const src = params.get('src') || undefined;
 
   const [data, setData] = useState<RedeemPayload | null>(null);
   const [msg, setMsg] = useState<string>('');
 
   useEffect(() => {
-    let alive = true;
-    (async () => {
-      try {
-        const res = await fetch(`/api/handoff/redeem?ht=${encodeURIComponent(handoffId)}`);
-        const json = (await res.json()) as RedeemPayload;
-        if (!alive) return;
-        setData(json);
-      } catch (e: any) {
-        if (!alive) return;
-        setData({ ok: false, error: e?.message ?? 'Failed to redeem' });
-      }
-    })();
-    return () => { alive = false; };
-  }, [handoffId]);
+    // 1) Secure handoff: redeem token if present
+    if (ht) {
+      let alive = true;
+      (async () => {
+        try {
+          const res = await fetch(`/api/handoff/redeem?ht=${encodeURIComponent(ht)}`);
+          const json = (await res.json()) as RedeemPayload;
+          if (!alive) return;
+          if (json?.ok) {
+            // Lightweight snapshot used by /nebula
+            const snap = {
+              profileId: json.profileId ?? null,
+              email: json.email ?? null,
+              leafTotal: typeof json.leafTotal === 'number' ? json.leafTotal : 0,
+              perks: [],
+              unlocked: { fund: !!json.fundUnlocked },
+            };
+            sessionStorage.setItem('hempin.account.profile', JSON.stringify(snap));
+            // Celebrate a proper handoff
+            window.location.replace('/nebula?welcome=token');
+            return;
+          }
+          setData(json);
+        } catch (e: any) {
+          setData({ ok: false, error: e?.message ?? 'Failed to redeem' });
+        }
+      })();
+      return () => { /* no-op */ };
+    }
+
+    // 2) Soft handoff: email-only from Market
+    if (!ht && emailParam) {
+      // We don’t authenticate here; just stage a minimal profile snapshot
+      const snap = {
+        profileId: null,
+        email: emailParam,
+        // optimistic 1 Leaf (the Market modal already added it server-side, but
+        // we can’t read the DB without auth; this is visual)
+        leafTotal: 1,
+        perks: [],
+        unlocked: {}, // nothing unlocked in soft flow
+      };
+      sessionStorage.setItem('hempin.account.profile', JSON.stringify(snap));
+      window.location.replace('/nebula?welcome=soft' + (src ? `&src=${encodeURIComponent(src)}` : ''));
+      return;
+    }
+
+    // 3) Neither token nor email → show the fallback UI
+    setData({ ok: false, error: 'Missing token' });
+  }, [ht, emailParam, src]);
 
   const sendLink = async () => {
     setMsg('Sending magic link…');
@@ -43,7 +84,7 @@ export default function Welcome() {
       const r = await fetch('/api/auth/magic-link', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: data?.email }),
+        body: JSON.stringify({ email: data?.email || emailParam }),
       });
       const j = await r.json();
       if (j?.ok) setMsg('Magic link sent. Check your inbox!');
