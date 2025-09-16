@@ -18,10 +18,12 @@ export async function GET(req: NextRequest) {
 
     const db = supabaseAdmin();
 
-    // 1) Fetch handoff token
+    // 1) Look up the handoff token
     const { data: ht, error: htErr } = await db
       .from("handoff_tokens")
-      .select("id, profile_id, email, leaf_snapshot, expires_at, consumed_at, metadata")
+      .select(
+        "id, profile_id, email, leaf_snapshot, expires_at, consumed_at, metadata"
+      )
       .eq("id", token)
       .maybeSingle();
 
@@ -37,30 +39,47 @@ export async function GET(req: NextRequest) {
         { status: 404 }
       );
     }
-    if (ht.consumed_at) {
-      // idempotent-ish: still return a success payload so the UX can proceed
-      // (but we won’t try to consume again).
-    } else if (ht.expires_at && new Date(ht.expires_at) < new Date()) {
+    if (!ht.consumed_at && ht.expires_at && new Date(ht.expires_at) < new Date()) {
       return NextResponse.json(
         { ok: false, error: "Token expired. Please start again." },
         { status: 410 }
       );
     }
 
-    // 2) Get a fresh leaf total from profiles (fallback to snapshot)
+    // 2) Compute a fresh Leaf XP total – prefer summing the ledger so
+    // recent events (like +1 email_capture) are reflected immediately.
     let leafTotal = ht.leaf_snapshot ?? 0;
+
     if (ht.profile_id) {
-      const { data: prof, error: pErr } = await db
-        .from("profiles")
-        .select("leaf_total, email")
-        .eq("id", ht.profile_id)
-        .maybeSingle();
-      if (!pErr && prof) {
-        leafTotal = typeof prof.leaf_total === "number" ? prof.leaf_total : leafTotal;
+      try {
+        const { data: rows, error: lErr } = await db
+          .from("leaf_ledger")
+          .select("leaf_delta")
+          .eq("profile_id", ht.profile_id);
+
+        if (!lErr && rows) {
+          leafTotal = rows.reduce(
+            (sum, r: { leaf_delta: number | null }) => sum + (r.leaf_delta ?? 0),
+            0
+          );
+        } else {
+          // Fallback: read profiles.leaf_total
+          const { data: prof } = await db
+            .from("profiles")
+            .select("leaf_total")
+            .eq("id", ht.profile_id)
+            .maybeSingle();
+
+          if (prof && typeof prof.leaf_total === "number") {
+            leafTotal = prof.leaf_total;
+          }
+        }
+      } catch {
+        // If anything fails, keep snapshot/fallback value
       }
     }
 
-    // 3) Mark token consumed (best-effort)
+    // 3) Mark token consumed (best-effort; OK if it was already consumed)
     if (!ht.consumed_at) {
       await db
         .from("handoff_tokens")
@@ -69,8 +88,8 @@ export async function GET(req: NextRequest) {
     }
 
     // 4) Decide unlocks
-    const fundUnlocked = true;                 // Fund always unlocked on first handoff
-    const marketUnlocked = src === "market";   // Unlock Market when the source is Market
+    const fundUnlocked = true;               // Always unlock Fund on first handoff
+    const marketUnlocked = src === "market"; // Unlock Market when arriving from Market
 
     return NextResponse.json({
       ok: true,
