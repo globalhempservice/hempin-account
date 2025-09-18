@@ -17,8 +17,7 @@ if (typeof window === 'undefined') {
 
 /**
  * Server-side Supabase client bound to the request cookies.
- * Use this in server components, route handlers, and server actions
- * when you need the *logged-in user’s* session.
+ * This version matches the CookieMethodsServer interface (getAll/setAll).
  */
 export function createServerSupabase() {
   const missing: string[] = [];
@@ -33,17 +32,16 @@ export function createServerSupabase() {
   const cookieStore = nextCookies();
 
   return createServerClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
-    headers: nextHeaders(),
+    headers: nextHeaders(), // pass through incoming headers (helpful for SSR)
     cookies: {
-      // Adapt Next’s cookie store to Supabase’s cookie interface
-      get(name: string) {
-        return cookieStore.get(name)?.value;
+      getAll() {
+        return cookieStore.getAll();
       },
-      set(name: string, value: string, options: Parameters<typeof cookieStore.set>[0] & { name?: string } = {}) {
-        cookieStore.set({ name, value, ...options });
-      },
-      remove(name: string, options: Parameters<typeof cookieStore.set>[0] & { name?: string } = {}) {
-        cookieStore.set({ name, value: '', ...options, maxAge: 0 });
+      setAll(cookiesToSet) {
+        cookiesToSet.forEach((cookie) => {
+          // cookie has shape: { name, value, ...options }
+          cookieStore.set(cookie);
+        });
       },
     },
   });
