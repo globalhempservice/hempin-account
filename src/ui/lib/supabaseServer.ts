@@ -1,7 +1,7 @@
 // src/ui/lib/supabaseServer.ts
 import { createClient } from '@supabase/supabase-js';
 import { createServerClient } from '@supabase/ssr';
-import { cookies as nextCookies, headers as nextHeaders } from 'next/headers';
+import { cookies as nextCookies } from 'next/headers';
 
 const SITE = process.env.NEXT_PUBLIC_SITE_ENV || 'unset';
 const SUPABASE_URL = process.env.SUPABASE_URL!;
@@ -17,7 +17,8 @@ if (typeof window === 'undefined') {
 
 /**
  * Server-side Supabase client bound to the request cookies.
- * This version matches the CookieMethodsServer interface (getAll/setAll).
+ * Uses the *deprecated* CookieMethodsServer shape (get/set/remove),
+ * which matches the version of @supabase/ssr in this project.
  */
 export function createServerSupabase() {
   const missing: string[] = [];
@@ -32,16 +33,17 @@ export function createServerSupabase() {
   const cookieStore = nextCookies();
 
   return createServerClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
-    headers: nextHeaders(), // pass through incoming headers (helpful for SSR)
     cookies: {
-      getAll() {
-        return cookieStore.getAll();
+      get(name: string) {
+        return cookieStore.get(name)?.value;
       },
-      setAll(cookiesToSet) {
-        cookiesToSet.forEach((cookie) => {
-          // cookie has shape: { name, value, ...options }
-          cookieStore.set(cookie);
-        });
+      set(name: string, value: string, options?: any) {
+        // Next 14 cookies().set supports (name, value, options)
+        cookieStore.set(name, value, options as any);
+      },
+      remove(name: string, options?: any) {
+        // Clearing via set with maxAge: 0
+        cookieStore.set(name, '', { ...(options || {}), maxAge: 0 } as any);
       },
     },
   });
