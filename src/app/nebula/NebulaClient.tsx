@@ -56,7 +56,8 @@ export default function NebulaClient({ initialEmail }: { initialEmail: string | 
         <div className="mt-12 flex items-center justify-center">
         <ProfilePlanet
   avatarUrl={data?.avatarUrl ?? null}
-  color={data?.planetColor ?? '#60a5fa'}
+  planetColor={data?.planetColor ?? '#60a5fa'}
+  onEdit={() => { window.location.href = '/profile/edit'; }}
 />
         </div>
 
