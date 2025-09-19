@@ -1,3 +1,4 @@
+// src/app/nebula/NebulaClient.tsx
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
@@ -10,56 +11,55 @@ type Snapshot = {
   leafTotal: number;
   perks: any[];
   unlocked: { fund?: boolean; market?: boolean };
-  avatar_url?: string | null;
-  planet_color?: string | null;
+  avatarUrl?: string | null;
+  planetColor?: string | null;
+  displayName?: string | null;
 };
 
 export default function NebulaClient({ initialEmail }: { initialEmail: string | null }) {
   const [data, setData] = useState<Snapshot | null>(null);
   const [celebrateFund, setCelebrateFund] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
 
-  // 1) Load snapshot from API and cache in sessionStorage for fast reloads
+  // Load cached snapshot immediately (fast paint)
   useEffect(() => {
-    const cached = sessionStorage.getItem('hempin.account.profile');
-    if (cached) {
-      try { setData(JSON.parse(cached)); } catch {}
+    const raw = sessionStorage.getItem('hempin.account.profile');
+    if (raw) {
+      try {
+        setData(JSON.parse(raw) as Snapshot);
+      } catch {}
     }
+  }, []);
+
+  // Always refresh from server (and recache)
+  useEffect(() => {
     (async () => {
       try {
+        setErr(null);
         const res = await fetch('/api/account/snapshot', { cache: 'no-store' });
-        const json = await res.json();
-        if (!res.ok) { setErr(json?.error || 'Failed to load'); return; }
-        sessionStorage.setItem('hempin.account.profile', JSON.stringify(json));
-        setData(json);
-        if (json?.unlocked?.fund) {
+        if (!res.ok) throw new Error(`snapshot ${res.status}`);
+        const snap = (await res.json()) as Snapshot;
+        setData(snap);
+        sessionStorage.setItem('hempin.account.profile', JSON.stringify(snap));
+
+        if (snap?.unlocked?.fund) {
           setCelebrateFund(true);
           const t = setTimeout(() => setCelebrateFund(false), 3000);
           return () => clearTimeout(t);
         }
       } catch (e: any) {
-        setErr(e?.message || 'Network error');
+        setErr('Could not load your Nebula.');
+      } finally {
+        setLoading(false);
       }
     })();
   }, []);
 
   const leaf = useMemo(() => data?.leafTotal ?? 0, [data]);
   const email = data?.email ?? initialEmail ?? null;
-
-  // Build public avatar URL if we only have a storage path
-  const avatar = useMemo(() => {
-    // If the API starts returning a fully-qualified URL, just use that.
-    // For now we assume we got a public path (supabase storage policy allows public read).
-    return data?.avatar_url
-      ? data.avatar_url.startsWith('http')
-        ? data.avatar_url
-        : `https://${
-            process.env.NEXT_PUBLIC_SUPABASE_URL?.replace(/^https?:\/\//, '') || ''
-          }/storage/v1/object/public/avatars/${data.avatar_url}`
-      : null;
-  }, [data?.avatar_url]);
-
-  const planetBg = data?.planet_color || 'rgba(99, 179, 237, .45)'; // default blue-ish
+  const planetColor = data?.planetColor || '#60a5fa'; // default soft blue
+  const avatarUrl = data?.avatarUrl || null;
 
   return (
     <main className="relative min-h-screen flex flex-col items-center justify-center px-6 py-16 text-center overflow-hidden">
@@ -90,36 +90,42 @@ export default function NebulaClient({ initialEmail }: { initialEmail: string | 
           Welcome{email ? `, ${email}` : ''}. Explore universes and grow your Leaf XP.
         </p>
 
-        {/* Center profile planet with avatar inside */}
+        {/* Center profile planet (avatar + color aura) */}
         <div className="mt-12 flex items-center justify-center">
           <div className="relative">
-            {/* soft glow */}
-            <div className="absolute -inset-24 blur-3xl opacity-30 pointer-events-none" />
+            {/* outer glow/aura using chosen color */}
+            <div
+              className="absolute -inset-24 blur-3xl opacity-30 pointer-events-none"
+              style={{
+                background: `radial-gradient(circle at 50% 50%, ${hexToRgbA(planetColor, 0.45)}, rgba(0,0,0,0) 60%)`,
+              }}
+            />
+            {/* the planet itself */}
             <div
               className="h-44 w-44 rounded-full shadow-2xl ring-1 ring-white/10 overflow-hidden relative"
-              style={{ background: planetBg }}
+              style={{
+                background: avatarUrl
+                  ? `center/cover no-repeat url("${avatarUrl}")`
+                  : `linear-gradient(135deg, ${tint(planetColor, 0.35)} 0%, ${tint(planetColor, -0.1)} 100%)`,
+              }}
             >
-              {avatar ? (
-                <img
-                  src={avatar}
-                  alt="avatar"
-                  className="absolute inset-0 h-full w-full object-cover opacity-85"
-                />
-              ) : (
-                <div className="absolute inset-0 bg-gradient-to-br from-sky-400/50 to-indigo-400/30" />
-              )}
+              {/* subtle color veil over the avatar to feel “inside” the planet */}
+              <div
+                className="absolute inset-0"
+                style={{ background: `radial-gradient(120% 120% at 50% 40%, ${hexToRgbA(planetColor, 0.25)}, transparent 60%)` }}
+              />
             </div>
           </div>
         </div>
 
-        {/* Edit profile / Leaf XP */}
-        <div className="mt-6 flex items-center justify-center gap-3">
-          <Link
+        {/* Action row: edit + Leaf XP */}
+        <div className="mt-6 flex justify-center gap-3">
+          <a
             href="/profile/edit"
-            className="rounded-md border border-white/15 bg-white/10 px-3 py-1.5 text-sm hover:bg-white/15"
+            className="rounded-md border border-white/15 bg-white/10 px-4 py-2 text-sm hover:bg-white/15 transition"
           >
             Edit profile
-          </Link>
+          </a>
           <div className="inline-flex items-center gap-2 rounded-full border border-white/15 bg-white/5 px-3 py-1.5 text-xs">
             <span className="opacity-80">Leaf XP</span>
             <span className="rounded-full bg-emerald-500/20 px-2 py-0.5 text-emerald-300">+{leaf}</span>
@@ -146,21 +152,56 @@ export default function NebulaClient({ initialEmail }: { initialEmail: string | 
           <UniverseCard title="Knowledge" />
           <UniverseCard title="Shop" />
         </div>
-
-        {err && <p className="mt-6 text-sm text-red-400">{err}</p>}
       </section>
 
+      {/* tiny footer */}
       <p className="relative z-10 mt-10 text-xs opacity-50">HEMPIN ACCOUNT — 2025</p>
+
+      {/* loading / error overlay (minimal) */}
+      {loading && (
+        <div className="absolute inset-0 grid place-items-center bg-black/20 backdrop-blur-sm">
+          <div className="rounded-md border border-white/10 bg-black/60 px-4 py-3 text-sm">Loading Nebula…</div>
+        </div>
+      )}
+      {!loading && err && (
+        <div className="absolute inset-0 grid place-items-center">
+          <div className="rounded-md border border-white/10 bg-black/70 px-4 py-3 text-sm">
+            {err} <button onClick={() => location.reload()} className="underline ml-2">Retry</button>
+          </div>
+        </div>
+      )}
     </main>
   );
 }
 
-/* ── Fund Card & helpers (unchanged) ───────────────────────────────────────── */
-function FundUniverseCard({
-  unlocked,
-  celebrate,
-  onClick,
-}: { unlocked: boolean; celebrate: boolean; onClick?: () => void }) {
+/* ── helpers for colors ───────────────────────────────────────────── */
+
+function hexToRgbA(hex: string, alpha = 1) {
+  let c = hex.replace('#', '');
+  if (c.length === 3) c = c.split('').map((x) => x + x).join('');
+  const num = parseInt(c, 16);
+  const r = (num >> 16) & 255;
+  const g = (num >> 8) & 255;
+  const b = num & 255;
+  return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+}
+
+// lighten (>0) or darken (<0)
+function tint(hex: string, amount: number) {
+  let c = hex.replace('#', '');
+  if (c.length === 3) c = c.split('').map((x) => x + x).join('');
+  let [r, g, b] = [(parseInt(c.slice(0, 2), 16)), (parseInt(c.slice(2, 4), 16)), (parseInt(c.slice(4, 6), 16))];
+  const t = amount > 0 ? 255 : 0;
+  const p = Math.abs(amount);
+  r = Math.round((t - r) * p + r);
+  g = Math.round((t - g) * p + g);
+  b = Math.round((t - b) * p + b);
+  return `#${[r, g, b].map((v) => v.toString(16).padStart(2, '0')).join('')}`;
+}
+
+/* ── existing cards (unchanged) ───────────────────────────────────── */
+
+function FundUniverseCard({ unlocked, celebrate, onClick }: { unlocked: boolean; celebrate: boolean; onClick?: () => void }) {
   return (
     <button
       onClick={unlocked ? onClick : undefined}
@@ -198,9 +239,10 @@ function Sparkles() {
     <>
       <style>{`
         @keyframes sparkleRise {
-          0% { transform: translateY(12px) scale(.8); opacity: 0 }
-          10% { opacity: .9 }
+          0%   { transform: translateY(12px) scale(.8); opacity: 0 }
+          10%  { opacity: .9 }
           100% { transform: translateY(-22px) scale(1.05); opacity: 0 }
+        }
       `}</style>
       <div className="pointer-events-none absolute inset-0">
         {Array.from({ length: 14 }).map((_, i) => {
@@ -216,8 +258,7 @@ function Sparkles() {
                 bottom: 8,
                 width: size,
                 height: size,
-                background:
-                  'radial-gradient(closest-side, rgba(255,210,240,.95), rgba(255,210,240,.2) 60%, rgba(255,210,240,0) 70%)',
+                background: 'radial-gradient(closest-side, rgba(255,210,240,.95), rgba(255,210,240,.2) 60%, rgba(255,210,240,0) 70%)',
                 animation: `sparkleRise ${900 + (i % 5) * 120}ms ease-out ${delay}ms forwards`,
                 filter: 'drop-shadow(0 0 4px rgba(255,180,230,.85))',
               }}
@@ -235,7 +276,13 @@ function UniverseCard({
   accent = 'from-slate-400/40 to-slate-500/20',
   badge,
   onClick,
-}: { title: string; unlocked?: boolean; accent?: string; badge?: string; onClick?: () => void }) {
+}: {
+  title: string;
+  unlocked?: boolean;
+  accent?: string;
+  badge?: string;
+  onClick?: () => void;
+}) {
   return (
     <button
       onClick={unlocked ? onClick : undefined}

@@ -8,41 +8,58 @@ export async function GET() {
   try {
     const supabase = createServerClientSupabase();
 
-    const { data: auth, error: authErr } = await supabase.auth.getUser();
-    if (authErr) {
-      console.error('snapshot:getUser error', authErr);
-      return NextResponse.json({ error: 'auth' }, { status: 500 });
-    }
+    // who is signed in?
+    const { data: auth } = await supabase.auth.getUser();
     const user = auth.user;
-    if (!user) {
-      return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
-    }
+    if (!user) return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
 
-    const { data: profile, error: profErr } = await supabase
+    // profile row
+    const { data: profile, error: pErr } = await supabase
       .from('profiles')
-      .select('id, auth_user_id, email, leaf_total, avatar_url, display_name, handle')
+      .select(
+        'id, email, leaf_total, avatar_url, planet_color, display_name'
+      )
       .eq('auth_user_id', user.id)
       .maybeSingle();
 
-    if (profErr) {
-      console.error('snapshot:profile error', profErr);
-      // continue with minimal payload instead of throwing
+    if (pErr) {
+      // return minimal snapshot so the UI can degrade gracefully
+      return NextResponse.json({
+        profileId: null,
+        email: user.email ?? null,
+        leafTotal: 0,
+        perks: [],
+        unlocked: {},
+        avatarUrl: null,
+        planetColor: null,
+        displayName: null,
+      });
+    }
+
+    // build a public URL for the avatar if present
+    let avatarUrl: string | null = null;
+    if (profile?.avatar_url) {
+      const { data: pub } = supabase.storage.from('avatars').getPublicUrl(profile.avatar_url);
+      avatarUrl = pub?.publicUrl ?? null;
     }
 
     const snapshot = {
       profileId: profile?.id ?? null,
       email: user.email ?? profile?.email ?? null,
       leafTotal: profile?.leaf_total ?? 0,
-      perks: [] as any[],
+      perks: [],
       unlocked: {
+        // wire these when you start unlocking things
         fund: false,
         market: false,
       },
+      avatarUrl,
+      planetColor: profile?.planet_color ?? null,
+      displayName: profile?.display_name ?? null,
     };
 
-    return NextResponse.json(snapshot, { headers: { 'cache-control': 'no-store' } });
+    return NextResponse.json(snapshot, { headers: { 'Cache-Control': 'no-store' } });
   } catch (e) {
-    console.error('snapshot route crash', e);
-    return NextResponse.json({ error: 'internal' }, { status: 500 });
+    return NextResponse.json({ error: 'snapshot-failed' }, { status: 500 });
   }
 }
