@@ -1,67 +1,51 @@
 // src/app/nebula/page.tsx
+import { headers, redirect } from 'next/navigation';
 import NebulaClient from './NebulaClient';
 
 export const dynamic = 'force-dynamic';
-export const revalidate = 0;
-
-type Snapshot = {
-  profileId: string | null;
-  email: string | null;
-  leafTotal: number;
-  perks: any[];
-  unlocked: { fund?: boolean; market?: boolean };
-};
 
 export default async function NebulaPage() {
-  // Prefer a relative URL so we don't depend on NEXT_PUBLIC_BASE_URL in SSR
-  const url = '/api/account/snapshot';
+  const h = headers();
 
-  let initialEmail: string | null = null;
+  // Prefer absolute URL on some hosts (Netlify); fallback to relative in local.
+  const base =
+    process.env.NEXT_PUBLIC_BASE_URL?.replace(/\/$/, '') ||
+    process.env.VERCEL_URL?.startsWith('http') ? process.env.VERCEL_URL : '';
+  const url = `${base}/api/account/snapshot`;
+
+  const res = await fetch(url, {
+    // Forward cookies explicitly for SSR -> API call
+    headers: { cookie: h.get('cookie') ?? '' },
+    cache: 'no-store',
+  });
+
+  // Not signed in: send to login (your login page will bounce back to nebula)
+  if (res.status === 401) {
+    redirect('/login');
+  }
+
+  let snap: any = null;
   try {
-    const res = await fetch(url, { cache: 'no-store' });
-
-    if (res.ok) {
-      const snap = (await res.json()) as Partial<Snapshot>;
-      initialEmail = (snap?.email as string) ?? null;
-    } else if (res.status === 401) {
-      // Not logged in → render a minimal CTA (no redirect during RSC)
-      return (
-        <main className="min-h-screen grid place-items-center p-6">
-          <div className="rounded-xl border border-white/10 bg-white/5 p-6 text-center">
-            <p className="opacity-80">You need to sign in to view your Nebula.</p>
-            <a className="mt-4 inline-block rounded bg-white/90 px-4 py-2 text-sm font-medium text-zinc-900" href="/login">
-              Go to sign in
-            </a>
-          </div>
-        </main>
-      );
-    } else {
-      // Non-OK that isn’t 401 – show a soft error instead of throwing
-      return (
-        <main className="min-h-screen grid place-items-center p-6">
-          <div className="rounded-xl border border-white/10 bg-white/5 p-6 text-center">
-            <p className="opacity-80">We couldn’t load your account right now.</p>
-            <a className="mt-4 inline-block rounded border border-white/15 bg-white/10 px-4 py-2 text-sm hover:bg-white/15" href="/login">
-              Try again
-            </a>
-          </div>
-        </main>
-      );
-    }
+    snap = await res.json();
   } catch {
-    // Network/function crash → keep the app alive with a friendly message
+    // ignore; handled below
+  }
+
+  if (!res.ok) {
+    console.error('snapshot fetch failed', res.status, snap);
     return (
       <main className="min-h-screen grid place-items-center p-6">
-        <div className="rounded-xl border border-white/10 bg-white/5 p-6 text-center">
-          <p className="opacity-80">Something went wrong loading your Nebula.</p>
-          <a className="mt-4 inline-block rounded border border-white/15 bg-white/10 px-4 py-2 text-sm hover:bg-white/15" href="/nebula">
-            Retry
-          </a>
+        <div className="rounded-xl border border-white/10 bg-black/50 p-6 text-center">
+          <p className="mb-3">Something went wrong loading your Nebula.</p>
+          <form action="/nebula">
+            <button className="rounded-md border border-white/15 bg-white/10 px-3 py-1.5 hover:bg-white/15">
+              Retry
+            </button>
+          </form>
         </div>
       </main>
     );
   }
 
-  // If we reach here, snapshot loaded — hand off to the client component
-  return <NebulaClient initialEmail={initialEmail} />;
+  return <NebulaClient initialEmail={snap?.email ?? null} />;
 }
