@@ -4,6 +4,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import Orb from '@/ui/organisms/Orb';
+import { createClient } from '@/lib/supabase/client';
 
 type Snapshot = {
   profileId: string | null;
@@ -11,26 +12,58 @@ type Snapshot = {
   leafTotal: number;
   perks: any[];
   unlocked: { fund?: boolean; market?: boolean };
+  // optional hints we may stash in session snapshot later
+  avatar_url?: string | null;
+  planet_color?: string | null;
 };
 
 export default function NebulaClient({ initialEmail }: { initialEmail: string | null }) {
+  const supabase = createClient();
   const [data, setData] = useState<Snapshot | null>(null);
+  const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
+  const [planetColor, setPlanetColor] = useState<string>('#60a5fa');
   const [celebrateFund, setCelebrateFund] = useState(false);
 
   useEffect(() => {
+    // 1) pull snapshot (leaf, unlocks, maybe avatar/color if we stashed them)
     const raw = sessionStorage.getItem('hempin.account.profile');
-    if (!raw) return;
-    try {
-      const snap = JSON.parse(raw) as Snapshot;
-      setData(snap);
+    if (raw) {
+      try {
+        const snap = JSON.parse(raw) as Snapshot;
+        setData(snap);
+        if (snap?.planet_color) setPlanetColor(snap.planet_color);
+        // if we already stored an avatar path we can resolve it
+        if (snap?.avatar_url) resolvePublicAvatar(snap.avatar_url);
 
-      if (snap?.unlocked?.fund) {
-        setCelebrateFund(true);
-        const t = setTimeout(() => setCelebrateFund(false), 3000);
-        return () => clearTimeout(t);
-      }
-    } catch {}
+        if (snap?.unlocked?.fund) {
+          setCelebrateFund(true);
+          const t = setTimeout(() => setCelebrateFund(false), 3000);
+          return () => clearTimeout(t);
+        }
+      } catch {}
+    }
+
+    // 2) fetch avatar + planet color from profiles for this user (fresh)
+    (async () => {
+      const { data: auth } = await supabase.auth.getUser();
+      const uid = auth.user?.id;
+      if (!uid) return;
+      const { data: row } = await supabase
+        .from('profiles')
+        .select('avatar_url, planet_color, email')
+        .eq('auth_user_id', uid)
+        .maybeSingle();
+
+      if (row?.planet_color) setPlanetColor(row.planet_color);
+      if (row?.avatar_url) resolvePublicAvatar(row.avatar_url);
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  function resolvePublicAvatar(storagePath: string) {
+    const { data: pub } = supabase.storage.from('avatars').getPublicUrl(storagePath);
+    if (pub?.publicUrl) setAvatarUrl(pub.publicUrl);
+  }
 
   const leaf = useMemo(() => data?.leafTotal ?? 0, [data]);
   const email = data?.email ?? initialEmail ?? null;
@@ -44,11 +77,7 @@ export default function NebulaClient({ initialEmail }: { initialEmail: string | 
             Hempin Account
           </Link>
           <div className="flex items-center gap-3">
-            {email && (
-              <span className="text-xs opacity-70 hidden sm:inline">
-                {email}
-              </span>
-            )}
+            {email && <span className="text-xs opacity-70 hidden sm:inline">{email}</span>}
             <a
               href="/logout"
               className="rounded-md border border-white/15 bg-white/10 px-3 py-1.5 text-sm hover:bg-white/15 transition"
@@ -68,11 +97,39 @@ export default function NebulaClient({ initialEmail }: { initialEmail: string | 
           Welcome{email ? `, ${email}` : ''}. Explore universes and grow your Leaf XP.
         </p>
 
-        {/* Center profile orb */}
+        {/* Center profile planet with avatar */}
         <div className="mt-12 flex items-center justify-center">
           <div className="relative">
-            <div className="absolute -inset-24 blur-3xl opacity-30 pointer-events-none" />
-            <div className="h-44 w-44 rounded-full bg-gradient-to-br from-sky-400/50 to-indigo-400/30 shadow-2xl ring-1 ring-white/10" />
+            {/* glow based on planet color */}
+            <div
+              className="absolute -inset-24 blur-3xl opacity-30 pointer-events-none"
+              style={{ background: `radial-gradient(circle, ${planetColor}55, transparent 60%)` }}
+            />
+            <div
+              className="relative h-44 w-44 rounded-full shadow-2xl ring-1 ring-white/10 overflow-hidden"
+              style={{ background: `radial-gradient(120px 120px at 30% 30%, ${planetColor}66, transparent 70%)` }}
+            >
+              {/* avatar face tint */}
+              {avatarUrl ? (
+                <img
+                  src={avatarUrl}
+                  alt="Avatar"
+                  className="h-full w-full object-cover mix-blend-screen opacity-90"
+                />
+              ) : (
+                <div className="h-full w-full opacity-40" />
+              )}
+            </div>
+
+            {/* Edit profile CTA under the planet */}
+            <div className="mt-4 flex justify-center">
+              <Link
+                href="/profile/edit"
+                className="rounded-md border border-white/15 bg-white/10 px-3 py-1.5 text-sm hover:bg-white/15 transition"
+              >
+                Edit profile
+              </Link>
+            </div>
           </div>
         </div>
 
@@ -86,14 +143,12 @@ export default function NebulaClient({ initialEmail }: { initialEmail: string | 
 
         {/* Universes */}
         <div className="mt-12 grid grid-cols-2 sm:grid-cols-3 gap-6">
-          {/* Fund — unlocked glow + sparkles */}
           <FundUniverseCard
             unlocked={!!data?.unlocked?.fund}
             celebrate={celebrateFund}
             onClick={() => alert('Fund universe — perks & receipts (WIP)')}
           />
 
-          {/* Market — sits next to Fund */}
           <UniverseCard
             title="Market"
             unlocked={!!data?.unlocked?.market}
@@ -102,7 +157,6 @@ export default function NebulaClient({ initialEmail }: { initialEmail: string | 
             onClick={() => alert('Market universe — WIP')}
           />
 
-          {/* Others locked for now */}
           <UniverseCard title="Farm" />
           <UniverseCard title="Brand" />
           <UniverseCard title="Factory" />
@@ -116,35 +170,25 @@ export default function NebulaClient({ initialEmail }: { initialEmail: string | 
   );
 }
 
-/* ────────────────────────────── Fund card (glowing) ───────────────────────────── */
-
+/* ────────────────────────────── Fund card ───────────────────────────── */
 function FundUniverseCard({
   unlocked,
   celebrate,
   onClick,
-}: {
-  unlocked: boolean;
-  celebrate: boolean;
-  onClick?: () => void;
-}) {
+}: { unlocked: boolean; celebrate: boolean; onClick?: () => void }) {
   return (
     <button
       onClick={unlocked ? onClick : undefined}
       className={`group relative overflow-hidden rounded-2xl border p-5 text-left transition ${
-        unlocked
-          ? 'border-white/10 bg-white/5 hover:bg-white/10'
-          : 'border-white/10 bg-black/20 opacity-70 cursor-not-allowed'
+        unlocked ? 'border-white/10 bg-white/5 hover:bg-white/10' : 'border-white/10 bg-black/20 opacity-70 cursor-not-allowed'
       }`}
     >
-      {/* Badge (mobile-safe) */}
       {unlocked && (
         <span className="absolute top-3 right-3 rounded-full border border-emerald-400/40 bg-emerald-500/20 px-2 py-0.5 text-emerald-200 text-[11px] leading-none shadow-sm">
           New
         </span>
       )}
-
       <div className="flex items-center gap-4">
-        {/* Orb avatar */}
         <div className="relative h-12 w-12 shrink-0">
           <div className="absolute inset-0 rounded-full bg-gradient-to-br from-pink-400/70 to-fuchsia-400/50 ring-1 ring-white/10" />
           {unlocked && (
@@ -154,19 +198,16 @@ function FundUniverseCard({
             </>
           )}
         </div>
-
         <div>
           <div className="text-sm opacity-80">Fund</div>
           <div className="text-xs opacity-60 mt-1">{unlocked ? 'Unlocked' : 'Locked — coming soon'}</div>
         </div>
       </div>
-
       {unlocked && celebrate && <Sparkles />}
     </button>
   );
 }
 
-/* Little sparkles that float up & fade for ~3s */
 function Sparkles() {
   return (
     <>
@@ -204,21 +245,13 @@ function Sparkles() {
   );
 }
 
-/* ────────────────────────────── Generic card ──────────────────────────── */
-
 function UniverseCard({
   title,
   unlocked = false,
   accent = 'from-slate-400/40 to-slate-500/20',
   badge,
   onClick,
-}: {
-  title: string;
-  unlocked?: boolean;
-  accent?: string;
-  badge?: string;
-  onClick?: () => void;
-}) {
+}: { title: string; unlocked?: boolean; accent?: string; badge?: string; onClick?: () => void }) {
   return (
     <button
       onClick={unlocked ? onClick : undefined}
