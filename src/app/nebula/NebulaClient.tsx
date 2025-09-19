@@ -54,11 +54,10 @@ export default function NebulaClient({ initialEmail }: { initialEmail: string | 
         </p>
 
         <div className="mt-12 flex items-center justify-center">
-          <ProfilePlanet
-            avatarUrl={avatarUrl}
-            color={planetColor}
-            onEdit={() => (window.location.href = '/profile/edit')}
-          />
+        <ProfilePlanet
+  avatarUrl={data?.avatarUrl ?? null}
+  color={data?.planetColor ?? '#60a5fa'}
+/>
         </div>
 
         {/* Keep just the Leaf XP pill here to avoid duplicate “Edit profile” */}
