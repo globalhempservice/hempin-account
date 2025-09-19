@@ -1,406 +1,318 @@
-// src/app/profile/edit/page.tsx
 'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { createClient } from '@/lib/supabase/client';
+import type { ProfileBasics, SocialLink } from '@/app/nebula/lib/types';
 
-type ProfileRow = {
-  auth_user_id: string;
-  display_name: string | null;
-  handle: string | null;
-  public_email: string | null;
-  locale: string | null;
-  country: string | null;
-  timezone: string | null;
-  avatar_url: string | null;    // storage path (e.g. "uid/avatar.png")
-  planet_color: string | null;  // hex color
+type State = {
+  real_name: string;
+  display_name: string;
+  bio: string;
+  country: string;
+  role: string;
+  links: SocialLink[];
+  avatar_url: string | null;   // storage path
+  planet_color: string;        // hex
+  avatarPreview: string | null; // public url (or local preview)
 };
 
-type SaveState = 'idle' | 'saving' | 'saved' | 'error';
+const fallbackState: State = {
+  real_name: '',
+  display_name: '',
+  bio: '',
+  country: '',
+  role: '',
+  links: [],
+  avatar_url: null,
+  planet_color: '#60a5fa',
+  avatarPreview: null,
+};
+
+const COUNTRY_OPTIONS = [
+  'United States', 'France', 'United Kingdom', 'Germany', 'Italy', 'Spain',
+  'Portugal', 'Switzerland', 'Canada', 'Brazil', 'Mexico', 'Japan', 'Korea',
+  'India', 'Australia', 'New Zealand', 'South Africa', 'Other',
+];
 
 export default function EditProfilePage() {
   const supabase = createClient();
-
   const [uid, setUid] = useState<string | null>(null);
-  const [row, setRow] = useState<ProfileRow | null>(null);
+  const [state, setState] = useState<State>(fallbackState);
+  const [saving, setSaving] = useState<boolean>(false);
+  const [saveTick, setSaveTick] = useState<number>(0);
+  const [savedAt, setSavedAt] = useState<number | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+  const [uploading, setUploading] = useState<boolean>(false);
 
-  // View state
-  const [avatarPreview, setAvatarPreview] = useState<string | null>(null);
-  const [uploading, setUploading] = useState(false);
-  const [uploadPct, setUploadPct] = useState(0);
-  const [saveState, setSaveState] = useState<SaveState>('idle');
-  const [errorMsg, setErrorMsg] = useState<string | null>(null);
-
-  // Debounce timer for autosave
-  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  // ─────────────────────────────────────────────────────────────────────────────
-  // bootstrap: load user + profile
+  // Load current
   useEffect(() => {
     (async () => {
       const { data: auth } = await supabase.auth.getUser();
-      if (!auth.user) {
-        window.location.replace('/login');
-        return;
-      }
+      if (!auth.user) { window.location.replace('/login'); return; }
       setUid(auth.user.id);
 
-      // fetch profile row
-      const { data: profile, error } = await supabase
+      const { data } = await supabase
         .from('profiles')
-        .select(
-          'auth_user_id, display_name, handle, public_email, locale, country, timezone, avatar_url, planet_color'
-        )
+        .select('real_name, display_name, bio, country, role, links, avatar_url, planet_color')
         .eq('auth_user_id', auth.user.id)
-        .maybeSingle();
+        .maybeSingle<ProfileBasics>();
 
-      if (error) {
-        setErrorMsg(error.message);
-        return;
-      }
-
-      // Ensure a row exists (in case it wasn't created yet)
-      if (!profile) {
-        const empty: Omit<ProfileRow, 'auth_user_id'> = {
-          display_name: null,
-          handle: null,
-          public_email: null,
-          locale: null,
-          country: null,
-          timezone: null,
-          avatar_url: null,
-          planet_color: '#60a5fa',
-        };
-        const { data: inserted, error: upErr } = await supabase
-          .from('profiles')
-          .insert({ ...empty, auth_user_id: auth.user.id })
-          .select('*')
-          .single();
-
-        if (upErr) {
-          setErrorMsg(upErr.message);
-          return;
+      if (data) {
+        // avatar public url (if any)
+        let preview: string | null = null;
+        if (data.avatar_url) {
+          const { data: pub } = supabase.storage.from('avatars').getPublicUrl(data.avatar_url);
+          preview = pub?.publicUrl ?? null;
         }
-        setRow(inserted as ProfileRow);
-      } else {
-        setRow(profile as ProfileRow);
-      }
-
-      // preload public avatar if exists
-      const path = profile?.avatar_url;
-      if (path) {
-        const { data: pub } = supabase.storage.from('avatars').getPublicUrl(path);
-        if (pub?.publicUrl) setAvatarPreview(pub.publicUrl);
+        setState({
+          real_name: data.real_name ?? '',
+          display_name: data.display_name ?? '',
+          bio: data.bio ?? '',
+          country: data.country ?? '',
+          role: data.role ?? '',
+          links: Array.isArray(data.links) ? (data.links as SocialLink[]) : [],
+          avatar_url: data.avatar_url ?? null,
+          planet_color: data.planet_color ?? '#60a5fa',
+          avatarPreview: preview,
+        });
       }
     })();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // ─────────────────────────────────────────────────────────────────────────────
-  // helpers
+  // Debounced auto-save whenever state changes (except avatarPreview)
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    if (!uid) return;
+    // Don’t auto-save while uploading avatar
+    if (uploading) return;
 
-  function scheduleAutosave(next: Partial<ProfileRow>) {
-    if (!row || !uid) return;
-    const updated: ProfileRow = { ...row, ...next };
-
-    // Local UI update first (optimistic)
-    setRow(updated);
-    setSaveState('saving');
-    setErrorMsg(null);
+    setSaving(true);
+    setErr(null);
 
     if (debounceRef.current) clearTimeout(debounceRef.current);
     debounceRef.current = setTimeout(async () => {
       try {
-        const payload: Partial<ProfileRow> = { ...next };
-        // never allow changing auth_user_id
-        delete (payload as any).auth_user_id;
+        const { error } = await supabase.from('profiles').update({
+          real_name: state.real_name || null,
+          display_name: state.display_name || null,
+          bio: state.bio || null,
+          country: state.country || null,
+          role: state.role || null,
+          links: state.links ?? [],
+          avatar_url: state.avatar_url || null,
+          planet_color: state.planet_color || null,
+        }).eq('auth_user_id', uid);
 
-        const { error } = await supabase
-          .from('profiles')
-          .update(payload)
-          .eq('auth_user_id', uid);
-
-        if (error) {
-          setSaveState('error');
-          setErrorMsg(error.message);
-        } else {
-          setSaveState('saved');
-          // tiny delay before going back to idle
-          setTimeout(() => setSaveState('idle'), 1000);
-        }
+        if (error) throw error;
+        setSavedAt(Date.now());
+        setSaveTick(t => t + 1);
+        setSaving(false);
       } catch (e: any) {
-        setSaveState('error');
-        setErrorMsg(e?.message ?? 'Failed to save');
+        setErr(e?.message || 'Could not save changes');
+        setSaving(false);
       }
-    }, 650);
-  }
+    }, 500);
+  }, [uid, state.real_name, state.display_name, state.bio, state.country, state.role, state.links, state.avatar_url, state.planet_color, uploading, supabase]);
 
-  async function onPickAvatar(e: React.ChangeEvent<HTMLInputElement>) {
-    if (!uid) return;
+  // Avatar upload (immediate local preview + upload + update row)
+  async function onFile(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
-    if (!file) return;
-
-    // show instant preview
-    const localUrl = URL.createObjectURL(file);
-    setAvatarPreview(localUrl);
+    if (!file || !uid) return;
+    setErr(null);
     setUploading(true);
-    setUploadPct(0);
-    setErrorMsg(null);
 
-    // a pseudo-progress while upload runs (supabase-js doesn't provide progress)
-    const p = setInterval(() => {
-      setUploadPct((prev) => (prev < 90 ? prev + 5 : prev));
-    }, 120);
+    // instant local preview
+    const objectUrl = URL.createObjectURL(file);
+    setState(s => ({ ...s, avatarPreview: objectUrl }));
 
     try {
-      const ext = file.name.split('.').pop() || 'jpg';
-      const path = `${uid}/avatar.${ext}`;
+      const path = `${uid}/avatar`;
+      const { error } = await supabase.storage.from('avatars').upload(path, file, {
+        upsert: true, cacheControl: '3600', contentType: file.type,
+      });
+      if (error) throw error;
 
-      // upsert = true ensures replacement on re-upload
-      const { error: upErr } = await supabase.storage
-        .from('avatars')
-        .upload(path, file, { upsert: true, cacheControl: '3600', contentType: file.type });
-
-      if (upErr) throw upErr;
-
-      // persist path to profile
-      const { error: dbErr } = await supabase
-        .from('profiles')
-        .update({ avatar_url: path })
-        .eq('auth_user_id', uid);
-
-      if (dbErr) throw dbErr;
-
-      // swap to the actual public URL
+      // public url and persist storage path in state (auto-save will update the row)
       const { data: pub } = supabase.storage.from('avatars').getPublicUrl(path);
-      if (pub?.publicUrl) setAvatarPreview(pub.publicUrl);
-
-      setUploadPct(100);
-      setTimeout(() => setUploading(false), 400);
-    } catch (err: any) {
-      setUploading(false);
-      setUploadPct(0);
-      setErrorMsg(err?.message ?? 'Avatar upload failed');
+      setState(s => ({ ...s, avatar_url: path, avatarPreview: pub?.publicUrl ?? objectUrl }));
+    } catch (e: any) {
+      setErr(e?.message || 'Upload failed');
     } finally {
-      clearInterval(p);
+      setUploading(false);
     }
   }
 
-  // derived
-  const color = useMemo(
-    () => (row?.planet_color && isHex(row.planet_color) ? row.planet_color : '#60a5fa'),
-    [row?.planet_color]
-  );
+  // Helpers to update fields
+  const setField = <K extends keyof State>(key: K) =>
+    (v: State[K]) => setState(s => ({ ...s, [key]: v }));
 
-  // ─────────────────────────────────────────────────────────────────────────────
-  // UI
+  const savedLabel = useMemo(() => {
+    if (saving) return 'Saving…';
+    if (!savedAt) return '—';
+    return 'Saved';
+  }, [saving, savedAt, saveTick]);
+
+  // links editor helpers
+  function addLink() {
+    setState(s => ({ ...s, links: [...s.links, { type: 'website', url: '' }] }));
+  }
+  function removeLink(i: number) {
+    setState(s => ({ ...s, links: s.links.filter((_, idx) => idx !== i) }));
+  }
+  function updateLink(i: number, next: Partial<SocialLink>) {
+    setState(s => ({
+      ...s,
+      links: s.links.map((lnk, idx) => idx === i ? { ...lnk, ...next } : lnk),
+    }));
+  }
 
   return (
-    <main className="min-h-screen px-5 py-5 sm:px-6 sm:py-10">
+    <main className="min-h-screen px-6 py-16">
       <div className="mx-auto w-full max-w-2xl">
-        <Header saveState={saveState} />
+        <header className="flex items-center justify-between">
+          <h1 className="text-2xl font-semibold">Edit your profile</h1>
+          <div className="text-xs opacity-70">{savedLabel}</div>
+        </header>
 
-        {/* Avatar + color */}
-        <section className="mt-6 rounded-xl border border-white/10 bg-white/[0.04] p-4 sm:p-5">
-          <div className="flex items-start gap-4">
-            {/* Planet avatar */}
-            <div className="relative h-24 w-24 shrink-0 rounded-full ring-1 ring-white/10 overflow-hidden"
-                 style={{
-                   background: `radial-gradient(110% 110% at 30% 30%, ${withAlpha(color, 0.65)} 0%, ${withAlpha(color, 0.35)} 45%, rgba(255,255,255,0.04) 80%)`
-                 }}>
-              {avatarPreview ? (
-                <img
-                  src={avatarPreview}
-                  alt="avatar"
-                  className="absolute inset-0 h-full w-full object-cover opacity-90 mix-blend-luminosity"
+        {/* Avatar + Color */}
+        <section className="mt-6 grid grid-cols-[auto,1fr] gap-5 items-center">
+          <div className="relative">
+            <div className="h-24 w-24 rounded-full ring-1 ring-white/10 overflow-hidden bg-white/5">
+              {state.avatarPreview ? (
+                <img src={state.avatarPreview} alt="avatar" className="h-full w-full object-cover" />
+              ) : null}
+            </div>
+            <label className="mt-2 inline-flex items-center gap-2 text-xs cursor-pointer">
+              <input type="file" accept="image/*" className="hidden" onChange={onFile} />
+              <span className="rounded-md border border-white/15 bg-white/10 px-3 py-1.5 hover:bg-white/15">
+                {uploading ? 'Uploading…' : (state.avatarPreview ? 'Change' : 'Upload avatar')}
+              </span>
+            </label>
+          </div>
+
+          <div>
+            <div className="text-sm mb-1">Planet color</div>
+            <input
+              type="color"
+              value={state.planet_color}
+              onChange={(e) => setField('planet_color')(e.target.value)}
+            />
+          </div>
+        </section>
+
+        {/* Names */}
+        <section className="mt-8 grid md:grid-cols-2 gap-4">
+          <div>
+            <label className="text-sm opacity-80">Display name / Nickname</label>
+            <input
+              className="mt-1 w-full rounded border border-white/10 bg-white/5 px-3 py-2"
+              placeholder="e.g. Hemp Explorer"
+              value={state.display_name}
+              onChange={(e) => setField('display_name')(e.target.value)}
+            />
+          </div>
+          <div>
+            <label className="text-sm opacity-80">Real name (optional)</label>
+            <input
+              className="mt-1 w-full rounded border border-white/10 bg-white/5 px-3 py-2"
+              placeholder="Your real/legal name"
+              value={state.real_name}
+              onChange={(e) => setField('real_name')(e.target.value)}
+            />
+          </div>
+        </section>
+
+        {/* Bio */}
+        <section className="mt-6">
+          <label className="text-sm opacity-80">Bio</label>
+          <textarea
+            className="mt-1 w-full rounded border border-white/10 bg-white/5 px-3 py-2 min-h-[90px]"
+            placeholder="Tell the hemp world about you…"
+            maxLength={300}
+            value={state.bio}
+            onChange={(e) => setField('bio')(e.target.value)}
+          />
+          <div className="mt-1 text-xs opacity-60">{state.bio.length}/300</div>
+        </section>
+
+        {/* Country + Role */}
+        <section className="mt-6 grid md:grid-cols-2 gap-4">
+          <div>
+            <label className="text-sm opacity-80">Country</label>
+            <select
+              className="mt-1 w-full rounded border border-white/10 bg-white/5 px-3 py-2"
+              value={state.country}
+              onChange={(e) => setField('country')(e.target.value)}
+            >
+              <option value="">Select…</option>
+              {COUNTRY_OPTIONS.map(c => <option key={c} value={c}>{c}</option>)}
+            </select>
+          </div>
+          <div>
+            <label className="text-sm opacity-80">Role</label>
+            <input
+              className="mt-1 w-full rounded border border-white/10 bg-white/5 px-3 py-2"
+              placeholder="e.g. Researcher, Brand, Farmer…"
+              value={state.role}
+              onChange={(e) => setField('role')(e.target.value)}
+            />
+          </div>
+        </section>
+
+        {/* Links */}
+        <section className="mt-8">
+          <div className="flex items-center justify-between">
+            <h2 className="text-lg font-medium">Links</h2>
+            <button
+              onClick={addLink}
+              className="rounded-md border border-white/15 bg-white/10 px-3 py-1.5 text-sm hover:bg-white/15"
+            >
+              Add link
+            </button>
+          </div>
+
+          <div className="mt-3 space-y-3">
+            {state.links.map((lnk, i) => (
+              <div key={i} className="grid grid-cols-[140px,1fr,auto] gap-2 items-center">
+                <select
+                  className="rounded border border-white/10 bg-white/5 px-2 py-2 text-sm"
+                  value={lnk.type}
+                  onChange={(e) => updateLink(i, { type: e.target.value as SocialLink['type'] })}
+                >
+                  <option value="website">Website</option>
+                  <option value="instagram">Instagram</option>
+                  <option value="linkedin">LinkedIn</option>
+                  <option value="x">X / Twitter</option>
+                  <option value="custom">Custom</option>
+                </select>
+                <input
+                  className="rounded border border-white/10 bg-white/5 px-3 py-2"
+                  placeholder="https://…"
+                  value={lnk.url}
+                  onChange={(e) => updateLink(i, { url: e.target.value })}
                 />
-              ) : (
-                <div className="absolute inset-0 opacity-10" />
-              )}
-
-              {/* subtle gloss */}
-              <div className="pointer-events-none absolute inset-0"
-                   style={{ background: 'radial-gradient(60% 50% at 28% 22%, rgba(255,255,255,.25), rgba(255,255,255,0) 60%)' }} />
-            </div>
-
-            <div className="flex-1">
-              <div className="text-sm font-medium">Avatar</div>
-              <p className="mt-1 text-xs opacity-70">Square images look best. JPG/PNG. Replacing an avatar will overwrite the previous one.</p>
-
-              <div className="mt-3 flex items-center gap-3">
-                <label className="inline-flex cursor-pointer items-center gap-2 rounded-md border border-white/15 bg-white/10 px-3 py-1.5 text-sm hover:bg-white/15">
-                  <input type="file" accept="image/*" className="hidden" onChange={onPickAvatar} />
-                  Upload image
-                </label>
-
-                <div className="flex items-center gap-2 text-xs">
-                  {uploading ? (
-                    <>
-                      <span className="opacity-80">Uploading…</span>
-                      <Progress value={uploadPct} />
-                    </>
-                  ) : null}
-                </div>
+                <button
+                  onClick={() => removeLink(i)}
+                  className="rounded border border-white/10 bg-white/5 px-2 py-2 text-sm hover:bg-white/10"
+                  title="Remove"
+                >
+                  ✕
+                </button>
               </div>
-
-              <div className="mt-5">
-                <div className="text-sm font-medium">Planet color</div>
-                <div className="mt-2 flex items-center gap-3">
-                  <input
-                    type="color"
-                    value={color}
-                    onChange={(e) => scheduleAutosave({ planet_color: e.target.value })}
-                    className="h-8 w-10 cursor-pointer rounded border border-white/10 bg-transparent p-0"
-                  />
-                  <span className="text-xs opacity-70">{color.toUpperCase()}</span>
-                </div>
-              </div>
-            </div>
+            ))}
+            {state.links.length === 0 && (
+              <div className="text-sm opacity-60">No links yet.</div>
+            )}
           </div>
         </section>
 
-        {/* Basics */}
-        <section className="mt-6 rounded-xl border border-white/10 bg-white/[0.04] p-4 sm:p-5">
-          <h2 className="text-sm font-medium">Basics</h2>
-
-          <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <Field
-              label="Display name"
-              value={row?.display_name ?? ''}
-              onChange={(v) => scheduleAutosave({ display_name: v })}
-              placeholder="Your name"
-            />
-            <Field
-              label="Handle"
-              prefix="@"
-              value={row?.handle ?? ''}
-              onChange={(v) => scheduleAutosave({ handle: v })}
-              placeholder="username"
-            />
-            <Field
-              label="Public email"
-              type="email"
-              value={row?.public_email ?? ''}
-              onChange={(v) => scheduleAutosave({ public_email: v })}
-              placeholder="optional"
-            />
-            <Field
-              label="Locale"
-              value={row?.locale ?? ''}
-              onChange={(v) => scheduleAutosave({ locale: v })}
-              placeholder="e.g. en-US"
-            />
-            <Field
-              label="Country"
-              value={row?.country ?? ''}
-              onChange={(v) => scheduleAutosave({ country: v })}
-              placeholder="Country"
-            />
-            <Field
-              label="Timezone"
-              value={row?.timezone ?? ''}
-              onChange={(v) => scheduleAutosave({ timezone: v })}
-              placeholder="e.g. Europe/Paris"
-            />
-          </div>
-        </section>
-
-        {/* Footer actions */}
-        <div className="mt-6 flex items-center justify-between">
-          <a href="/nebula" className="text-sm underline opacity-80 hover:opacity-100">Back to Nebula</a>
-          {errorMsg ? <span className="text-xs text-red-400">{errorMsg}</span> : null}
+        {/* Footer */}
+        <div className="mt-10 flex items-center justify-between">
+          <a href="/nebula" className="underline text-sm">Back to Nebula</a>
+          {err && <div className="text-sm text-red-400">{err}</div>}
         </div>
       </div>
     </main>
   );
-}
-
-/* ───────────────────────────── UI bits ───────────────────────────── */
-
-function Header({ saveState }: { saveState: SaveState }) {
-  return (
-    <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
-      <h1 className="text-2xl font-semibold tracking-tight">Edit your profile</h1>
-      <SaveBadge state={saveState} />
-    </div>
-  );
-}
-
-function SaveBadge({ state }: { state: SaveState }) {
-  if (state === 'saving') return <Badge>Saving…</Badge>;
-  if (state === 'saved') return <Badge className="bg-emerald-600/25 border-emerald-500/40">Saved</Badge>;
-  if (state === 'error') return <Badge className="bg-red-600/20 border-red-500/40">Error</Badge>;
-  return <span className="text-xs opacity-0">.</span>; // keep layout stable
-}
-
-function Badge({ children, className = '' }: { children: React.ReactNode; className?: string }) {
-  return (
-    <span className={`inline-flex items-center rounded-full border border-white/15 bg-white/10 px-2.5 py-1 text-xs ${className}`}>
-      {children}
-    </span>
-  );
-}
-
-function Field({
-  label,
-  value,
-  onChange,
-  placeholder,
-  type = 'text',
-  prefix,
-}: {
-  label: string;
-  value: string;
-  onChange: (v: string) => void;
-  placeholder?: string;
-  type?: string;
-  prefix?: string;
-}) {
-  return (
-    <label className="block">
-      <div className="text-xs mb-1 opacity-80">{label}</div>
-      <div className="flex items-stretch">
-        {prefix ? (
-          <span className="inline-flex items-center rounded-l-md border border-white/10 bg-white/5 px-2 text-sm opacity-80">
-            {prefix}
-          </span>
-        ) : null}
-        <input
-          type={type}
-          value={value}
-          onChange={(e) => onChange(e.target.value)}
-          placeholder={placeholder}
-          className={`w-full ${prefix ? 'rounded-r-md' : 'rounded-md'} border border-white/10 bg-white/5 px-3 py-2 text-sm outline-none focus:border-white/20`}
-        />
-      </div>
-    </label>
-  );
-}
-
-function Progress({ value }: { value: number }) {
-  return (
-    <div aria-label="upload progress" className="h-2 w-28 rounded bg-white/10 overflow-hidden">
-      <div
-        className="h-full bg-white/80 transition-[width] duration-200"
-        style={{ width: `${Math.max(0, Math.min(100, value))}%` }}
-      />
-    </div>
-  );
-}
-
-/* ───────────────────────────── utils ───────────────────────────── */
-
-function isHex(v?: string | null) {
-  if (!v) return false;
-  return /^#([0-9a-f]{3}|[0-9a-f]{6})$/i.test(v);
-}
-
-function withAlpha(hex: string, alpha: number): string {
-  const h = hex.replace('#', '');
-  const short = h.length === 3;
-  const r = parseInt(short ? h[0] + h[0] : h.slice(0, 2), 16);
-  const g = parseInt(short ? h[1] + h[1] : h.slice(2, 4), 16);
-  const b = parseInt(short ? h[2] + h[2] : h.slice(4, 6), 16);
-  const a = Math.max(0, Math.min(1, alpha));
-  return `rgba(${r}, ${g}, ${b}, ${a})`;
 }

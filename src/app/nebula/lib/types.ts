@@ -1,24 +1,25 @@
-// Minimal shared types for Nebula components.
-// Keep tiny on purpose; expand as we add features.
+// Minimal shared types for Nebula components + profile edit.
+
+export type SocialLink =
+  | { type: 'website'|'instagram'|'linkedin'|'x'|'custom'; url: string; label?: string };
 
 export type Snapshot = {
   profileId: string | null;
   email: string | null;
   leafTotal: number;
-  perks: any[];
-  unlocked: {
-    fund?: boolean;
-    market?: boolean;
-  };
-
-  // Optional fields (camelCase) used by the UI.
-  // If the API returns snake_case, the UI maps them at runtime.
+  unlocked: { fund?: boolean; market?: boolean };
+  // enriched for the nebula planet
   avatarUrl?: string | null;
   planetColor?: string | null;
 };
 
 export type ProfileBasics = {
-  avatar_url: string | null;
-  planet_color: string | null;
+  real_name?: string | null;
   display_name?: string | null;
+  bio?: string | null;
+  country?: string | null;   // free text or ISO code
+  role?: string | null;      // free text for now
+  links?: SocialLink[];      // JSONB array
+  avatar_url?: string | null;
+  planet_color?: string | null;
 };
