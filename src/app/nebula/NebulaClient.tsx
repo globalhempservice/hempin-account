@@ -40,7 +40,7 @@ export default function NebulaClient({ initialEmail }: { initialEmail: string | 
       {/* Top bar */}
       <header className="absolute top-0 left-0 right-0 z-20">
         <div className="mx-auto max-w-5xl px-4 py-3 flex items-center justify-between">
-          <Link href="/welcome" className="text-sm font-medium opacity-90 hover:opacity-100">
+          <Link href="/nebula" className="text-sm font-medium opacity-90 hover:opacity-100">
             Hempin Account
           </Link>
           <div className="flex items-center gap-3">
@@ -108,22 +108,6 @@ export default function NebulaClient({ initialEmail }: { initialEmail: string | 
           <UniverseCard title="Factory" />
           <UniverseCard title="Knowledge" />
           <UniverseCard title="Shop" />
-        </div>
-
-        {/* CTA row */}
-        <div className="mt-12 flex flex-wrap items-center justify-center gap-3">
-          <a
-            href="/welcome"
-            className="rounded-md border border-white/15 bg-white/10 px-4 py-2 text-sm hover:bg-white/15 transition"
-          >
-            Back to account home
-          </a>
-          <button
-            onClick={() => alert('Profile editor coming soon')}
-            className="rounded-md bg-white/90 px-4 py-2 text-sm font-medium text-zinc-900 hover:bg-white"
-          >
-            Complete your profile
-          </button>
         </div>
       </section>
 
