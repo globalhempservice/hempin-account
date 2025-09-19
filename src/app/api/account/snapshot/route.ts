@@ -1,32 +1,66 @@
-// server-only
+// src/app/api/account/snapshot/route.ts
 import { NextResponse } from 'next/server';
-import { createServerSupabase } from '@/ui/lib/supabaseServer';
+import { createServerClientSupabase } from '@/lib/supabase/server';
+
+export const runtime = 'nodejs';          // ensure Node (not Edge)
+export const dynamic = 'force-dynamic';   // never pre-render
+export const revalidate = 0;
 
 export async function GET() {
-  const supabase = createServerSupabase();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  try {
+    const supabase = createServerClientSupabase();
 
-  const { data: profile } = await supabase
-    .from('profiles')
-    .select('id, display_name, email, avatar_url, planet_hue, leaf_total, is_public')
-    .eq('auth_user_id', user.id)
-    .maybeSingle();
+    const {
+      data: { user },
+      error: authErr,
+    } = await supabase.auth.getUser();
 
-  // Market unlock: any role row → unlocked
-  const { count: marketCount } = await supabase
-    .from('market_roles')
-    .select('*', { count: 'exact', head: true })
-    .eq('profile_id', profile?.id ?? '');
+    if (authErr) {
+      return NextResponse.json({ error: authErr.message }, { status: 401 });
+    }
+    if (!user) {
+      return NextResponse.json({ error: 'not_authenticated' }, { status: 401 });
+    }
 
-  return NextResponse.json({
-    email: user.email ?? profile?.email ?? null,
-    profileId: profile?.id ?? null,
-    displayName: profile?.display_name ?? null,
-    avatarUrl: profile?.avatar_url ?? null,
-    planetHue: profile?.planet_hue ?? 210,
-    leafTotal: profile?.leaf_total ?? 0,
-    isPublic: profile?.is_public ?? false,
-    unlocked: { market: (marketCount ?? 0) > 0, fund: false },
-  });
+    // Pull basic profile fields that power Nebula
+    const { data: profile, error } = await supabase
+      .from('profiles')
+      .select(
+        [
+          'id',
+          'email',
+          'display_name',
+          'avatar_url',
+          'leaf_total',
+          'planet_color',
+          // these can be boolean columns you add later; they safely coerce here
+          'unlocked_fund',
+          'unlocked_market',
+        ].join(', ')
+      )
+      .eq('auth_user_id', user.id)
+      .maybeSingle();
+
+    if (error) {
+      return NextResponse.json({ error: error.message }, { status: 500 });
+    }
+
+    const snapshot = {
+      profileId: profile?.id ?? null,
+      email: user.email ?? profile?.email ?? null,
+      leafTotal: profile?.leaf_total ?? 0,
+      perks: [],
+      unlocked: {
+        fund: Boolean((profile as any)?.unlocked_fund),
+        market: Boolean((profile as any)?.unlocked_market),
+      },
+      avatar_url: profile?.avatar_url ?? null,
+      planet_color: profile?.planet_color ?? null,
+    };
+
+    return NextResponse.json(snapshot);
+  } catch (e: any) {
+    console.error('[/api/account/snapshot] crash', e);
+    return NextResponse.json({ error: 'internal_error' }, { status: 500 });
+  }
 }
