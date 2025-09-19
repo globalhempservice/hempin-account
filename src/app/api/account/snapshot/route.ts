@@ -1,10 +1,21 @@
-// src/app/api/account/snapshot/route.ts
 import { NextResponse } from 'next/server';
 import { createServerClientSupabase } from '@/lib/supabase/server';
 
-export const runtime = 'nodejs';          // ensure Node (not Edge)
-export const dynamic = 'force-dynamic';   // never pre-render
+export const runtime = 'nodejs';
+export const dynamic = 'force-dynamic';
 export const revalidate = 0;
+
+// Minimal shape of the row we read from `profiles`
+type ProfileRow = {
+  id: string;
+  email: string | null;
+  display_name?: string | null;
+  avatar_url: string | null;
+  leaf_total: number | null;
+  planet_color: string | null;
+  unlocked_fund?: boolean | null;
+  unlocked_market?: boolean | null;
+};
 
 export async function GET() {
   try {
@@ -22,21 +33,11 @@ export async function GET() {
       return NextResponse.json({ error: 'not_authenticated' }, { status: 401 });
     }
 
-    // Pull basic profile fields that power Nebula
-    const { data: profile, error } = await supabase
+    const { data, error } = await supabase
       .from('profiles')
       .select(
-        [
-          'id',
-          'email',
-          'display_name',
-          'avatar_url',
-          'leaf_total',
-          'planet_color',
-          // these can be boolean columns you add later; they safely coerce here
-          'unlocked_fund',
-          'unlocked_market',
-        ].join(', ')
+        // explicit list so TS knows what we expect
+        'id,email,display_name,avatar_url,leaf_total,planet_color,unlocked_fund,unlocked_market'
       )
       .eq('auth_user_id', user.id)
       .maybeSingle();
@@ -45,14 +46,17 @@ export async function GET() {
       return NextResponse.json({ error: error.message }, { status: 500 });
     }
 
+    // Help TS: either a ProfileRow or null
+    const profile = (data as ProfileRow | null) ?? null;
+
     const snapshot = {
       profileId: profile?.id ?? null,
       email: user.email ?? profile?.email ?? null,
       leafTotal: profile?.leaf_total ?? 0,
-      perks: [],
+      perks: [] as any[],
       unlocked: {
-        fund: Boolean((profile as any)?.unlocked_fund),
-        market: Boolean((profile as any)?.unlocked_market),
+        fund: Boolean(profile?.unlocked_fund),
+        market: Boolean(profile?.unlocked_market),
       },
       avatar_url: profile?.avatar_url ?? null,
       planet_color: profile?.planet_color ?? null,
