@@ -16,7 +16,9 @@ export default function NebulaClient({ initialEmail }: { initialEmail: string | 
 
   useEffect(() => {
     const raw = sessionStorage.getItem('hempin.account.profile');
-    if (raw) try { setData(JSON.parse(raw)); } catch {}
+    if (raw) {
+      try { setData(JSON.parse(raw)); } catch {}
+    }
     (async () => {
       try {
         const res = await fetch('/api/account/snapshot', { cache: 'no-store' });
@@ -24,12 +26,21 @@ export default function NebulaClient({ initialEmail }: { initialEmail: string | 
         const snap = await res.json();
         setData(snap);
         sessionStorage.setItem('hempin.account.profile', JSON.stringify(snap));
-      } catch { setErr('Could not load your Nebula.'); }
-      finally { setLoading(false); }
+      } catch {
+        setErr('Could not load your Nebula.');
+      } finally {
+        setLoading(false);
+      }
     })();
   }, []);
 
   const email = data?.email ?? initialEmail ?? null;
+
+  // Fallback mapping: accept camelCase or snake_case from API/snapshot
+  const avatarUrl =
+    data?.avatarUrl ?? (data as any)?.avatar_url ?? null;
+  const planetColor =
+    data?.planetColor ?? (data as any)?.planet_color ?? '#60a5fa';
 
   return (
     <main className="relative min-h-screen flex flex-col items-center justify-center px-6 py-16 text-center overflow-hidden">
@@ -44,13 +55,14 @@ export default function NebulaClient({ initialEmail }: { initialEmail: string | 
 
         <div className="mt-12 flex items-center justify-center">
           <ProfilePlanet
-            avatarUrl={data?.avatarUrl ?? null}
-            planetColor={data?.planetColor ?? '#60a5fa'}
+            avatarUrl={avatarUrl}
+            color={planetColor}
+            onEdit={() => (window.location.href = '/profile/edit')}
           />
         </div>
 
-        <div className="mt-6 flex justify-center gap-3">
-          <a href="/profile/edit" className="rounded-md border border-white/15 bg-white/10 px-4 py-2 text-sm hover:bg-white/15">Edit profile</a>
+        {/* Keep just the Leaf XP pill here to avoid duplicate “Edit profile” */}
+        <div className="mt-6 flex justify-center">
           <LeafPill value={data?.leafTotal ?? 0} />
         </div>
 
