@@ -1,25 +1,24 @@
 // src/app/nebula/page.tsx
-import { headers, redirect } from 'next/navigation';
+import { headers as nextHeaders } from 'next/headers';
+import { redirect } from 'next/navigation';
 import NebulaClient from './NebulaClient';
 
 export const dynamic = 'force-dynamic';
 
 export default async function NebulaPage() {
-  const h = headers();
+  const h = nextHeaders();
 
-  // Prefer absolute URL on some hosts (Netlify); fallback to relative in local.
+  // Prefer absolute base on hosts like Netlify
   const base =
     process.env.NEXT_PUBLIC_BASE_URL?.replace(/\/$/, '') ||
-    process.env.VERCEL_URL?.startsWith('http') ? process.env.VERCEL_URL : '';
+    (process.env.VERCEL_URL?.startsWith('http') ? process.env.VERCEL_URL : '');
   const url = `${base}/api/account/snapshot`;
 
   const res = await fetch(url, {
-    // Forward cookies explicitly for SSR -> API call
     headers: { cookie: h.get('cookie') ?? '' },
     cache: 'no-store',
   });
 
-  // Not signed in: send to login (your login page will bounce back to nebula)
   if (res.status === 401) {
     redirect('/login');
   }
@@ -28,7 +27,7 @@ export default async function NebulaPage() {
   try {
     snap = await res.json();
   } catch {
-    // ignore; handled below
+    // fall through to error UI
   }
 
   if (!res.ok) {
