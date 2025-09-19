@@ -1,56 +1,185 @@
 'use client';
 
-import { useState } from 'react';
-import { createClient } from '@/lib/supabase/client';
+import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
+import { createClient } from '@/lib/supabase/client';
+
+type Phase = 'form' | 'check-email';
 
 export default function SignupPage() {
   const supabase = createClient();
+  const [phase, setPhase] = useState<Phase>('form');
+
+  const [displayName, setDisplayName] = useState('');
+  const [email, setEmail] = useState('');
+  const [pwd, setPwd] = useState('');
+
   const [msg, setMsg] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
+  const [pending, setPending] = useState(false);
 
-  async function signUp(e: React.FormEvent<HTMLFormElement>) {
+  // If already signed in, go straight to nebula
+  useEffect(() => {
+    (async () => {
+      const { data } = await supabase.auth.getUser();
+      if (data.user) window.location.replace('/nebula');
+    })();
+  }, [supabase]);
+
+  const redirectTo = useMemo(
+    () => `${window.location.origin}/auth/callback`,
+    []
+  );
+
+  async function handleSignup(e: React.FormEvent) {
     e.preventDefault();
-    setMsg(null); setErr(null);
-    const form = e.currentTarget;
-    const email = (form.elements.namedItem('email') as HTMLInputElement).value;
-    const password = (form.elements.namedItem('password') as HTMLInputElement).value;
-    const display_name = (form.elements.namedItem('display_name') as HTMLInputElement).value;
+    setErr(null); setMsg(null); setPending(true);
 
     const { data, error } = await supabase.auth.signUp({
-      email, password,
+      email,
+      password: pwd,
       options: {
-        data: { display_name }, // gets mirrored to user_metadata
-        emailRedirectTo: '/auth/callback',
-      }
+        data: { display_name: displayName },
+        emailRedirectTo: redirectTo,
+      },
     });
 
-    if (error) { setErr(error.message); return; }
+    setPending(false);
 
-    if (data.user?.identities && data.user?.identities.length > 0) {
-      // If email confirm is off, session might be active already:
-      window.location.href = '/';
-    } else {
-      setMsg('Check your email to confirm your account.');
+    if (error) {
+      setErr(error.message);
+      return;
     }
+
+    // If email confirmation is disabled, user may already be logged in:
+    if (data.session) {
+      window.location.href = '/nebula';
+      return;
+    }
+
+    // Otherwise show the “check your email” screen
+    setPhase('check-email');
+    setMsg('We sent you a confirmation link. Open it on this device to continue.');
+  }
+
+  async function resend() {
+    setErr(null); setMsg(null);
+    const { error } = await supabase.auth.resend({
+      type: 'signup',
+      email,
+      options: { emailRedirectTo: redirectTo },
+    });
+    if (error) setErr(error.message);
+    else setMsg('Email re-sent. Please check your inbox.');
   }
 
   return (
-    <main className="min-h-screen grid place-items-center p-4">
-      <div className="w-full max-w-md rounded-xl border border-neutral-800 bg-neutral-950 p-6 space-y-4">
-        <h1 className="text-xl font-semibold">Create account</h1>
-        <form onSubmit={signUp} className="space-y-3">
-          <input name="display_name" placeholder="Display name" className="w-full rounded border border-neutral-700 bg-black px-3 py-2" />
-          <input name="email" type="email" required placeholder="Email" className="w-full rounded border border-neutral-700 bg-black px-3 py-2" />
-          <input name="password" type="password" required placeholder="Password" className="w-full rounded border border-neutral-700 bg-black px-3 py-2" />
-          <button className="w-full rounded bg-white/10 px-3 py-2 hover:bg-white/20">Sign up</button>
-        </form>
-        {msg && <div className="text-sm text-emerald-400">{msg}</div>}
-        {err && <div className="text-sm text-red-400">{err}</div>}
-        <div className="text-sm text-neutral-400">
-          Already have an account? <Link className="underline" href="/login">Sign in</Link>
-        </div>
+    <main className="relative min-h-screen grid place-items-center p-5 overflow-hidden">
+      <AuthBackdrop />
+
+      <div className="relative z-10 w-full max-w-md rounded-2xl border border-white/10 bg-black/50 backdrop-blur-md p-6 shadow-2xl">
+        {phase === 'form' ? (
+          <>
+            <h1 className="text-xl font-semibold tracking-tight">Create your Hempin account</h1>
+            <p className="mt-1 text-sm text-white/60">
+              One account for your whole Hempin nebula.
+            </p>
+
+            <form onSubmit={handleSignup} className="mt-5 space-y-3">
+              <input
+                name="display_name"
+                placeholder="Display name"
+                value={displayName}
+                onChange={(e) => setDisplayName(e.target.value)}
+                className="w-full rounded-md border border-white/10 bg-white/5 px-3 py-2 text-sm outline-none focus:border-white/20"
+              />
+              <input
+                name="email"
+                type="email"
+                required
+                placeholder="Email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                className="w-full rounded-md border border-white/10 bg-white/5 px-3 py-2 text-sm outline-none focus:border-white/20"
+              />
+              <input
+                name="password"
+                type="password"
+                required
+                placeholder="Password"
+                value={pwd}
+                onChange={(e) => setPwd(e.target.value)}
+                className="w-full rounded-md border border-white/10 bg-white/5 px-3 py-2 text-sm outline-none focus:border-white/20"
+              />
+              <button
+                disabled={pending}
+                className="w-full rounded-md bg-white/90 text-zinc-900 px-3 py-2 text-sm font-medium hover:bg-white disabled:opacity-60"
+              >
+                {pending ? 'Creating…' : 'Create account'}
+              </button>
+            </form>
+
+            {err && <p className="mt-3 text-sm text-red-400">{err}</p>}
+            {msg && <p className="mt-3 text-sm text-emerald-300">{msg}</p>}
+
+            <p className="mt-5 text-sm text-white/60">
+              Already have an account?{' '}
+              <Link className="underline" href="/login">Sign in</Link>
+            </p>
+          </>
+        ) : (
+          <>
+            <h1 className="text-xl font-semibold tracking-tight">Check your email</h1>
+            <p className="mt-2 text-sm text-white/70">
+              We sent a confirmation link to <span className="text-white">{email}</span>.
+              Open it on this device to finish signing up.
+            </p>
+
+            {err && <p className="mt-3 text-sm text-red-400">{err}</p>}
+            {msg && <p className="mt-3 text-sm text-emerald-300">{msg}</p>}
+
+            <div className="mt-6 grid gap-3">
+              <TipCard title="Your Nebula" body="Unlock universes (Market, Fund, more) from a single account." />
+              <TipCard title="Leaf XP" body="Collect Leaf XP across the ecosystem for perks & access." />
+              <TipCard title="Privacy-first" body="Public profile is optional and separate from your account." />
+            </div>
+
+            <div className="mt-6 flex items-center justify-between">
+              <button
+                onClick={resend}
+                className="rounded-md border border-white/15 bg-white/10 px-3 py-2 text-sm hover:bg-white/15"
+              >
+                Resend email
+              </button>
+              <Link href="/login" className="text-sm underline opacity-80 hover:opacity-100">
+                Back to sign in
+              </Link>
+            </div>
+          </>
+        )}
       </div>
     </main>
+  );
+}
+
+/* ————— small UI helpers (inline to avoid new files) ————— */
+
+function AuthBackdrop() {
+  return (
+    <div aria-hidden className="pointer-events-none absolute inset-0">
+      <div className="absolute -top-40 -left-40 h-96 w-96 rounded-full blur-3xl"
+           style={{ background: 'radial-gradient(circle, rgba(120,200,255,.35), rgba(0,0,0,0) 60%)' }} />
+      <div className="absolute -bottom-40 -right-40 h-[28rem] w-[28rem] rounded-full blur-3xl"
+           style={{ background: 'radial-gradient(circle, rgba(160,120,255,.28), rgba(0,0,0,0) 60%)' }} />
+    </div>
+  );
+}
+
+function TipCard({ title, body }: { title: string; body: string }) {
+  return (
+    <div className="rounded-lg border border-white/10 bg-white/[0.06] p-3 text-left">
+      <div className="text-sm font-medium">{title}</div>
+      <div className="mt-1 text-xs opacity-70">{body}</div>
+    </div>
   );
 }
