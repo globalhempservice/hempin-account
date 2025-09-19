@@ -14,7 +14,7 @@ export default function SignupPage() {
   const [email, setEmail] = useState('');
   const [pwd, setPwd] = useState('');
 
-  const [msg, setMsg] = useState<string | null>(null);
+  const [status, setStatus] = useState<string | null>(null); // success/info text
   const [err, setErr] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
 
@@ -36,7 +36,9 @@ export default function SignupPage() {
 
   async function handleSignup(e: React.FormEvent) {
     e.preventDefault();
-    setErr(null); setMsg(null); setPending(true);
+    setErr(null);
+    setStatus(null);
+    setPending(true);
 
     const { data, error } = await supabase.auth.signUp({
       email,
@@ -55,25 +57,26 @@ export default function SignupPage() {
     }
 
     if (data.session) {
-      // If email confirmation is off, a session may already exist
+      // If email confirmation is OFF, session may already exist.
       window.location.href = '/nebula';
       return;
     }
 
-    // Show “check email” screen
+    // Show a single, clear success line on the waiting screen.
     setPhase('check-email');
-    setMsg('We sent you a confirmation link. Open it on this device to continue.');
+    setStatus(`Confirmation email sent to ${email}. Open it on this device to continue.`);
   }
 
   async function resend() {
-    setErr(null); setMsg(null);
+    setErr(null);
+    setStatus(null);
     const { error } = await supabase.auth.resend({
       type: 'signup',
       email,
       options: { emailRedirectTo: buildRedirectTo() },
     });
     if (error) setErr(error.message);
-    else setMsg('Email re-sent. Please check your inbox.');
+    else setStatus('Email re-sent. Please check your inbox.');
   }
 
   return (
@@ -84,9 +87,7 @@ export default function SignupPage() {
         {phase === 'form' ? (
           <>
             <h1 className="text-xl font-semibold tracking-tight">Create your Hempin account</h1>
-            <p className="mt-1 text-sm text-white/60">
-              One account for your whole Hempin nebula.
-            </p>
+            <p className="mt-1 text-sm text-white/60">One account for your whole Hempin Nebula.</p>
 
             <form onSubmit={handleSignup} className="mt-5 space-y-3">
               <input
@@ -123,24 +124,26 @@ export default function SignupPage() {
             </form>
 
             {err && <p className="mt-3 text-sm text-red-400">{err}</p>}
-            {msg && <p className="mt-3 text-sm text-emerald-300">{msg}</p>}
 
-            <p className="mt-5 text-sm text-white/60">
-              Already have an account? <a className="underline" href="/login">Sign in</a>
+            <p className="mt-6 text-sm text-white/60">
+              Already have an account?{' '}
+              <Link className="underline" href="/login">
+                Sign in
+              </Link>
             </p>
           </>
         ) : (
           <>
             <h1 className="text-xl font-semibold tracking-tight">Check your email</h1>
-            <p className="mt-2 text-sm text-white/70">
-              We sent a confirmation link to <span className="text-white">{email}</span>.
-              Open it on this device to finish signing up.
-            </p>
 
-            {err && <p className="mt-3 text-sm text-red-400">{err}</p>}
-            {msg && <p className="mt-3 text-sm text-emerald-300">{msg}</p>}
+            {/* Single, non-duplicated status line */}
+            {status && <p className="mt-2 text-sm text-emerald-300">{status}</p>}
+            {err && <p className="mt-2 text-sm text-red-400">{err}</p>}
 
-            <div className="mt-6 grid gap-3">
+            {/* Small intro above the tips */}
+            <p className="mt-6 text-sm text-white/70">After confirmation, here’s what you can do in Hempin:</p>
+
+            <div className="mt-3 grid gap-3">
               <TipCard title="Your Nebula" body="Unlock universes (Market, Fund, more) from a single account." />
               <TipCard title="Leaf XP" body="Collect Leaf XP across the ecosystem for perks & access." />
               <TipCard title="Privacy-first" body="Public profile is optional and separate from your account." />
@@ -167,10 +170,14 @@ export default function SignupPage() {
 function AuthBackdrop() {
   return (
     <div aria-hidden className="pointer-events-none absolute inset-0">
-      <div className="absolute -top-40 -left-40 h-96 w-96 rounded-full blur-3xl"
-           style={{ background: 'radial-gradient(circle, rgba(120,200,255,.35), rgba(0,0,0,0) 60%)' }} />
-      <div className="absolute -bottom-40 -right-40 h-[28rem] w-[28rem] rounded-full blur-3xl"
-           style={{ background: 'radial-gradient(circle, rgba(160,120,255,.28), rgba(0,0,0,0) 60%)' }} />
+      <div
+        className="absolute -top-40 -left-40 h-96 w-96 rounded-full blur-3xl"
+        style={{ background: 'radial-gradient(circle, rgba(120,200,255,.35), rgba(0,0,0,0) 60%)' }}
+      />
+      <div
+        className="absolute -bottom-40 -right-40 h-[28rem] w-[28rem] rounded-full blur-3xl"
+        style={{ background: 'radial-gradient(circle, rgba(160,120,255,.28), rgba(0,0,0,0) 60%)' }}
+      />
     </div>
   );
 }
