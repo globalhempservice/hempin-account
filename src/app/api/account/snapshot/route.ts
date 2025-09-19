@@ -1,70 +1,55 @@
 import { NextResponse } from 'next/server';
-import { createServerClientSupabase } from '@/lib/supabase/server';
+import { createServerClientSupabase } from '@/lib/supabase/server'; // keep this import name if your helper exports it
 
-export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
-export const revalidate = 0;
-
-// Minimal shape of the row we read from `profiles`
-type ProfileRow = {
-  id: string;
-  email: string | null;
-  display_name?: string | null;
-  avatar_url: string | null;
-  leaf_total: number | null;
-  planet_color: string | null;
-  unlocked_fund?: boolean | null;
-  unlocked_market?: boolean | null;
-};
 
 export async function GET() {
   try {
     const supabase = createServerClientSupabase();
 
-    const {
-      data: { user },
-      error: authErr,
-    } = await supabase.auth.getUser();
-
+    // 1) Auth guard
+    const { data: auth, error: authErr } = await supabase.auth.getUser();
     if (authErr) {
-      return NextResponse.json({ error: authErr.message }, { status: 401 });
+      console.error('snapshot:getUser error', authErr);
+      return NextResponse.json({ error: 'auth' }, { status: 500 });
     }
+    const user = auth.user;
     if (!user) {
-      return NextResponse.json({ error: 'not_authenticated' }, { status: 401 });
+      return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
     }
 
-    const { data, error } = await supabase
+    // 2) Read profile. Select only safe, known columns.
+    const { data: profile, error: profErr } = await supabase
       .from('profiles')
       .select(
-        // explicit list so TS knows what we expect
-        'id,email,display_name,avatar_url,leaf_total,planet_color,unlocked_fund,unlocked_market'
+        // keep this list in sync with your table; avoid selecting unknown columns
+        'id, auth_user_id, email, leaf_total, avatar_url, display_name, handle'
       )
       .eq('auth_user_id', user.id)
       .maybeSingle();
 
-    if (error) {
-      return NextResponse.json({ error: error.message }, { status: 500 });
+    if (profErr) {
+      // Do not throw; return a 200 with minimal snapshot so the UI still renders
+      console.error('snapshot:profile error', profErr);
     }
 
-    // Help TS: either a ProfileRow or null
-    const profile = (data as ProfileRow | null) ?? null;
-
+    // 3) Build the snapshot payload without assuming profile exists
     const snapshot = {
       profileId: profile?.id ?? null,
       email: user.email ?? profile?.email ?? null,
       leafTotal: profile?.leaf_total ?? 0,
       perks: [] as any[],
       unlocked: {
-        fund: Boolean(profile?.unlocked_fund),
-        market: Boolean(profile?.unlocked_market),
+        fund: false,
+        market: false,
       },
-      avatar_url: profile?.avatar_url ?? null,
-      planet_color: profile?.planet_color ?? null,
     };
 
-    return NextResponse.json(snapshot);
-  } catch (e: any) {
-    console.error('[/api/account/snapshot] crash', e);
-    return NextResponse.json({ error: 'internal_error' }, { status: 500 });
+    return NextResponse.json(snapshot, {
+      headers: { 'cache-control': 'no-store' },
+    });
+  } catch (e) {
+    console.error('snapshot route crash', e);
+    return NextResponse.json({ error: 'internal' }, { status: 500 });
   }
 }
