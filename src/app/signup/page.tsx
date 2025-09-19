@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { createClient } from '@/lib/supabase/client';
 
@@ -18,7 +18,7 @@ export default function SignupPage() {
   const [err, setErr] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
 
-  // If already signed in, go straight to nebula
+  // If already signed in, go to nebula
   useEffect(() => {
     (async () => {
       const { data } = await supabase.auth.getUser();
@@ -26,10 +26,13 @@ export default function SignupPage() {
     })();
   }, [supabase]);
 
-  const redirectTo = useMemo(
-    () => `${window.location.origin}/auth/callback`,
-    []
-  );
+  function buildRedirectTo() {
+    const base =
+      typeof window !== 'undefined'
+        ? window.location.origin
+        : process.env.NEXT_PUBLIC_BASE_URL || 'https://account.hempin.org';
+    return `${base}/auth/callback`;
+  }
 
   async function handleSignup(e: React.FormEvent) {
     e.preventDefault();
@@ -40,7 +43,7 @@ export default function SignupPage() {
       password: pwd,
       options: {
         data: { display_name: displayName },
-        emailRedirectTo: redirectTo,
+        emailRedirectTo: buildRedirectTo(),
       },
     });
 
@@ -51,13 +54,13 @@ export default function SignupPage() {
       return;
     }
 
-    // If email confirmation is disabled, user may already be logged in:
     if (data.session) {
+      // If email confirmation is off, a session may already exist
       window.location.href = '/nebula';
       return;
     }
 
-    // Otherwise show the “check your email” screen
+    // Show “check email” screen
     setPhase('check-email');
     setMsg('We sent you a confirmation link. Open it on this device to continue.');
   }
@@ -67,7 +70,7 @@ export default function SignupPage() {
     const { error } = await supabase.auth.resend({
       type: 'signup',
       email,
-      options: { emailRedirectTo: redirectTo },
+      options: { emailRedirectTo: buildRedirectTo() },
     });
     if (error) setErr(error.message);
     else setMsg('Email re-sent. Please check your inbox.');
@@ -123,8 +126,7 @@ export default function SignupPage() {
             {msg && <p className="mt-3 text-sm text-emerald-300">{msg}</p>}
 
             <p className="mt-5 text-sm text-white/60">
-              Already have an account?{' '}
-              <Link className="underline" href="/login">Sign in</Link>
+              Already have an account? <a className="underline" href="/login">Sign in</a>
             </p>
           </>
         ) : (
@@ -161,8 +163,6 @@ export default function SignupPage() {
     </main>
   );
 }
-
-/* ————— small UI helpers (inline to avoid new files) ————— */
 
 function AuthBackdrop() {
   return (

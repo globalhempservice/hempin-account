@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { createClient } from '@/lib/supabase/client';
 
@@ -11,18 +11,13 @@ export default function LoginPage() {
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
 
-  // If already signed in, go straight to nebula
+  // If already signed in, go to nebula
   useEffect(() => {
     (async () => {
       const { data } = await supabase.auth.getUser();
       if (data.user) window.location.replace('/nebula');
     })();
   }, [supabase]);
-
-  const redirectTo = useMemo(
-    () => `${window.location.origin}/auth/callback`,
-    []
-  );
 
   async function signInPassword(e: React.FormEvent) {
     e.preventDefault();
@@ -79,7 +74,6 @@ export default function LoginPage() {
   );
 }
 
-/* reuse same backdrop as signup */
 function AuthBackdrop() {
   return (
     <div aria-hidden className="pointer-events-none absolute inset-0">
