@@ -1,6 +1,7 @@
 // src/app/nebula/components/UniverseGrid.tsx
 'use client';
 
+import { useRouter } from 'next/navigation';
 import UniverseCard from './UniverseCard';
 
 type Unlocked = { fund?: boolean; market?: boolean };
@@ -14,6 +15,8 @@ type Item = {
 };
 
 export default function UniverseGrid({ unlocked }: { unlocked: Unlocked }) {
+  const router = useRouter();
+
   const items: Item[] = [
     {
       key: 'fund',
@@ -60,9 +63,25 @@ export default function UniverseGrid({ unlocked }: { unlocked: Unlocked }) {
     },
   ];
 
-  const handleClick = (key: Item['key']) => {
-    if (key === 'fund' && unlocked?.fund) alert('Fund universe — perks & receipts (WIP)');
-    if (key === 'market' && unlocked?.market) alert('Market universe — WIP');
+  const handleClick = async (key: Item['key']) => {
+    if (key === 'fund' && unlocked?.fund) {
+      // Placeholder until Fund UI is ready
+      alert('Fund universe — perks & receipts (WIP)');
+      return;
+    }
+
+    if (key === 'market') {
+      try {
+        // Unlock (idempotent — will no-op if already unlocked)
+        await fetch('/api/market/unlock', { method: 'POST', cache: 'no-store' });
+      } catch {
+        // ignore; still continue to page
+      }
+      router.push('/market');
+      return;
+    }
+
+    // Locked or not implemented yet → no-op for now
   };
 
   return (
