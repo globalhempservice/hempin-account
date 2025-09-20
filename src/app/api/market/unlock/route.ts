@@ -1,28 +1,46 @@
--- Universes catalog (keeps keys tidy)
-create table if not exists public.universes (
-  key text primary key
-);
+import { NextResponse } from 'next/server';
+import { createServerClientSupabase } from '@/lib/supabase/server';
 
-insert into public.universes(key) values ('fund'), ('market')
-on conflict do nothing;
+export async function POST() {
+  const supabase = createServerClientSupabase();
 
--- Which users unlocked which universes
-create table if not exists public.user_universes (
-  auth_user_id uuid not null references auth.users(id) on delete cascade,
-  key text not null references public.universes(key) on delete cascade,
-  unlocked_at timestamptz not null default now(),
-  primary key (auth_user_id, key)
-);
+  const { data: { user }, error: uerr } = await supabase.auth.getUser();
+  if (uerr || !user) return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
 
-alter table public.user_universes enable row level security;
+  // already unlocked?
+  const { data: existing } = await supabase
+    .from('user_universes')
+    .select('key')
+    .eq('auth_user_id', user.id)
+    .eq('key', 'market')
+    .maybeSingle();
 
--- Policies: users can see and insert their own rows
-drop policy if exists user_universes_select on public.user_universes;
-create policy user_universes_select
-  on public.user_universes for select
-  using (auth.uid() = auth_user_id);
+  if (existing) {
+    return NextResponse.json({ newlyUnlocked: false });
+  }
 
-drop policy if exists user_universes_insert on public.user_universes;
-create policy user_universes_insert
-  on public.user_universes for insert
-  with check (auth.uid() = auth_user_id);
+  // unlock + award XP (+1) atomically-ish
+  const { error: insErr } = await supabase
+    .from('user_universes')
+    .insert({ auth_user_id: user.id, key: 'market' });
+  if (insErr) return NextResponse.json({ error: insErr.message }, { status: 400 });
+
+  // bump leaf_total (ignore errors quietly)
+  await supabase.rpc('sql', {}); // noop if you had a RPC; using an update instead:
+  await supabase
+    .from('profiles')
+    .update({ leaf_total: (await getLeaf(supabase, user.id)) + 1 })
+    .eq('auth_user_id', user.id);
+
+  return NextResponse.json({ newlyUnlocked: true });
+}
+
+// helper to read current leaf_total safely
+async function getLeaf(supabase: any, uid: string): Promise<number> {
+  const { data } = await supabase
+    .from('profiles')
+    .select('leaf_total')
+    .eq('auth_user_id', uid)
+    .maybeSingle();
+  return data?.leaf_total ?? 0;
+}
