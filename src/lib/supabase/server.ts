@@ -1,12 +1,10 @@
+// src/lib/supabase/server.ts
 import { createServerClient } from '@supabase/ssr'
 import { cookies } from 'next/headers'
 
-/**
- * Server-side Supabase client (SSR/Route Handlers).
- * Uses the ANON key so RLS still applies to the logged-in user session.
- * (Use the service role only in isolated admin jobs, never in requests.)
- */
-export function createSupabaseServerClient() {
+const PARENT_DOMAIN = '.hempin.org' // share session across all subdomains
+
+export function createServerClientSupabase() {
   const cookieStore = cookies()
 
   return createServerClient(
@@ -17,15 +15,34 @@ export function createSupabaseServerClient() {
         get(name: string) {
           return cookieStore.get(name)?.value
         },
-        set(name: string, value: string, options?: Parameters<typeof cookieStore.set>[0] extends object ? Omit<Parameters<typeof cookieStore.set>[0], 'name' | 'value'> : any) {
-          cookieStore.set({ name, value, ...(options || {}) } as any)
+        set(
+          name: string,
+          value: string,
+          options?: Parameters<typeof cookieStore.set>[0] extends object
+            ? Omit<Parameters<typeof cookieStore.set>[0], 'name' | 'value'>
+            : any
+        ) {
+          cookieStore.set({
+            name,
+            value,
+            domain: PARENT_DOMAIN,
+            path: '/',
+            httpOnly: true,
+            sameSite: 'none',
+            secure: true,
+            ...(options || {}),
+          } as any)
         },
         remove(name: string, options?: any) {
-          // emulate "remove" by setting an already-expired cookie
           cookieStore.set({
             name,
             value: '',
+            domain: PARENT_DOMAIN,
+            path: '/',
             expires: new Date(0),
+            httpOnly: true,
+            sameSite: 'none',
+            secure: true,
             ...(options || {}),
           } as any)
         },
@@ -34,5 +51,5 @@ export function createSupabaseServerClient() {
   )
 }
 
-/** Back-compat alias for existing imports */
-export const createServerClientSupabase = createSupabaseServerClient
+// Back-compat alias (other code imports this)
+export const createServerClient = createServerClientSupabase

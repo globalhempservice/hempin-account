@@ -1,7 +1,16 @@
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server'
 
-export async function GET() {
-  // Supabase sets the auth cookie on this redirect domain automatically.
-  // After email confirmation / OAuth return, land on the Nebula.
-  return NextResponse.redirect(new URL('/nebula', process.env.NEXT_PUBLIC_BASE_URL || 'https://account.hempin.org'));
+// Supabase sets cookies via our server client cookie hooks.
+// We just redirect the user back to where they started (if provided).
+export async function GET(req: NextRequest) {
+  const url = new URL(req.url)
+  const returnTo = url.searchParams.get('returnTo')
+
+  const fallback = process.env.NEXT_PUBLIC_BASE_URL || 'https://account.hempin.org'
+  const dest =
+    returnTo && /^https:\/\/[a-z0-9.-]*hempin\.org(\/|$)/i.test(returnTo)
+      ? returnTo
+      : `${fallback}/nebula`
+
+  return NextResponse.redirect(dest)
 }
