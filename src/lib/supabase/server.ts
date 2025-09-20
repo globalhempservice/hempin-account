@@ -1,5 +1,5 @@
 // src/lib/supabase/server.ts
-import { createServerClient as createSupabaseServerClient } from '@supabase/ssr'
+import { createServerClient } from '@supabase/ssr'
 import { cookies } from 'next/headers'
 
 const PARENT_DOMAIN = '.hempin.org' // share session across all subdomains
@@ -7,7 +7,7 @@ const PARENT_DOMAIN = '.hempin.org' // share session across all subdomains
 export function createServerClientSupabase() {
   const cookieStore = cookies()
 
-  return createSupabaseServerClient(
+  return createServerClient(
     process.env.SUPABASE_URL as string,
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY as string,
     {
@@ -51,5 +51,5 @@ export function createServerClientSupabase() {
   )
 }
 
-// Back-compat alias for existing imports elsewhere in the app
-export const createServerClientLegacy = createServerClientSupabase
+// Back-compat alias (other code may import this)
+export const createServerClient = createServerClientSupabase
