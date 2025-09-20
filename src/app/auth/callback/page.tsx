@@ -1,13 +1,11 @@
 'use client';
 
 import { useEffect } from 'react';
-import { createClient } from '@/lib/supabase/client';
 
 function safeNext(urlStr: string | null): string | null {
   if (!urlStr) return null;
   try {
     const u = new URL(urlStr);
-    // Allow only *.hempin.org (secure subdomains)
     if (u.protocol !== 'https:') return null;
     if (!u.hostname.endsWith('.hempin.org')) return null;
     return u.toString();
@@ -16,23 +14,37 @@ function safeNext(urlStr: string | null): string | null {
   }
 }
 
+function getHashParams(): Record<string, string> {
+  const hash = (typeof window !== 'undefined' && window.location.hash) || '';
+  const qs = new URLSearchParams(hash.startsWith('#') ? hash.slice(1) : hash);
+  const out: Record<string, string> = {};
+  qs.forEach((v, k) => (out[k] = v));
+  return out;
+}
+
 export default function AuthCallback() {
   useEffect(() => {
     (async () => {
-      const supabase = createClient();
+      // 1) read tokens from the hash (supabase puts them there for magic links)
+      const hp = getHashParams();
+      const access_token = hp['access_token'];
+      const refresh_token = hp['refresh_token'];
 
-      // 1) Parse URL hash (contains access_token) and write cookies for parent domain
-      try {
-        await supabase.auth.getSession();
-      } catch (e) {
-        console.error('Error finalizing session', e);
+      // 2) ask the server route to set the session cookies on .hempin.org
+      if (access_token && refresh_token) {
+        await fetch('/api/auth/set-session', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ access_token, refresh_token }),
+          credentials: 'include',
+        }).catch(() => {});
       }
 
-      // 2) Figure out where to send the user next
-      const params = new URLSearchParams(window.location.search);
-      const nextUrl = safeNext(params.get('next')) ?? '/nebula';
+      // 3) compute next URL (default: /nebula)
+      const search = new URLSearchParams(window.location.search);
+      const nextUrl = safeNext(search.get('next')) ?? '/nebula';
 
-      // 3) Clean up hash and redirect
+      // 4) clean URL & go
       const clean = new URL(window.location.href);
       clean.hash = '';
       window.history.replaceState(null, '', clean.toString());
