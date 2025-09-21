@@ -4,6 +4,7 @@
 import { useEffect } from 'react';
 import { createClient } from '@/lib/supabase/client';
 
+
 function safeNext(urlStr: string | null) {
   if (!urlStr) return null;
   try {
@@ -12,6 +13,8 @@ function safeNext(urlStr: string | null) {
     if (!u.hostname.endsWith('.hempin.org')) return null;
     return u.toString();
   } catch {
+    // allow safe relative paths as well
+    if (urlStr.startsWith('/')) return urlStr;
     return null;
   }
 }
