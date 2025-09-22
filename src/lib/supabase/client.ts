@@ -1,17 +1,15 @@
+// src/lib/supabase/client.ts
+'use client'
+
 import { createBrowserClient } from '@supabase/ssr'
 
-/**
- * Preferred helper
- */
-export function createSupabaseBrowserClient() {
+export function createClient() {
   return createBrowserClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL as string,
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY as string
   )
 }
 
-/**
- * Back-compat alias for existing imports in pages
- * (e.g. import { createClient } from '@/lib/supabase/client')
- */
-export const createClient = createSupabaseBrowserClient
+// Optional back-compat alias (if any old imports use it)
+export const createSupabaseBrowserClient = createClient
+export const createBrowserClientCompat = createClient

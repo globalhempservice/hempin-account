@@ -1,65 +1,42 @@
 // src/app/auth/callback/page.tsx
-'use client';
+'use client'
 
-import { useEffect } from 'react';
-import { createClient } from '@/lib/supabase/client';
+import { useEffect } from 'react'
 
-
-function safeNext(urlStr: string | null) {
-  if (!urlStr) return null;
+function safeNext(urlStr: string | null): string {
+  if (!urlStr) return '/nebula'
   try {
-    const u = new URL(urlStr);
-    if (u.protocol !== 'https:') return null;
-    if (!u.hostname.endsWith('.hempin.org')) return null;
-    return u.toString();
+    const u = new URL(urlStr)
+    if (u.protocol !== 'https:') return '/nebula'
+    if (!u.hostname.endsWith('.hempin.org')) return '/nebula'
+    return u.toString()
   } catch {
-    // allow safe relative paths as well
-    if (urlStr.startsWith('/')) return urlStr;
-    return null;
+    return '/nebula'
   }
 }
 
-export default function AuthCallback() {
+export default function AccountAuthCallbackForwarder() {
   useEffect(() => {
-    (async () => {
-      const supabase = createClient();
+    const url = new URL(window.location.href)
+    const next = safeNext(url.searchParams.get('next'))
 
-      // If magic-link returned ?code=..., exchange it
-      const url = new URL(window.location.href);
-      const code = url.searchParams.get('code');
-      if (code) {
-        try { await supabase.auth.exchangeCodeForSession(code); } catch {}
-      } else {
-        // Or if tokens came in the hash, parse & set client session
-        try { await supabase.auth.getSession(); } catch {}
-      }
+    // Always forward to the central auth service
+    const authUrl = new URL('https://auth.hempin.org/login')
+    authUrl.searchParams.set('next', next)
 
-      // Ask server to set parent-domain cookies
-      const { data } = await supabase.auth.getSession();
-      const access_token = data.session?.access_token;
-      const refresh_token = data.session?.refresh_token;
-      if (access_token && refresh_token) {
-        await fetch('/api/auth/finish', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          credentials: 'include',
-          body: JSON.stringify({ access_token, refresh_token }),
-        }).catch(() => {});
-      }
+    // If a supabase code accidentally lands here, keep it in the URL
+    // so the auth hub can still finalize properly.
+    const code = url.searchParams.get('code')
+    if (code) authUrl.searchParams.set('code', code)
 
-      // Redirect to next or /nebula
-      const next = safeNext(url.searchParams.get('next')) ?? '/nebula';
-      url.searchParams.delete('code'); url.hash = '';
-      window.history.replaceState(null, '', url.toString());
-      window.location.replace(next);
-    })();
-  }, []);
+    window.location.replace(authUrl.toString())
+  }, [])
 
   return (
     <main className="min-h-screen grid place-items-center p-6">
       <div className="rounded-xl border border-white/10 bg-white/5 px-5 py-4 text-sm">
-        Finalizing sign-in…
+        Redirecting to sign-in…
       </div>
     </main>
-  );
+  )
 }

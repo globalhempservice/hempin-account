@@ -1,15 +1,17 @@
 // src/app/nebula/page.tsx
 import { headers } from 'next/headers';
+import { redirect } from 'next/navigation';
+import { createServerClientSupabase } from '@/lib/supabase/server';
 import NebulaClient from './NebulaClient';
 
 export const dynamic = 'force-dynamic';
 
 function getOriginFromHeaders(h: Headers) {
-  // Prefer public base URL if you’ve set it in Netlify env
+  // Prefer a configured public base URL if present
   const envBase = process.env.NEXT_PUBLIC_BASE_URL;
   if (envBase) return envBase.replace(/\/+$/, '');
 
-  // Build from forwarded headers
+  // Derive from forwarded headers (Netlify / proxies)
   const host = h.get('x-forwarded-host') || h.get('host');
   const proto =
     h.get('x-forwarded-proto') ||
@@ -21,20 +23,33 @@ function getOriginFromHeaders(h: Headers) {
 export default async function NebulaPage() {
   const h = headers();
 
+  // --- 1) Server-side auth guard -------------------------------------------
+  const supabase = createServerClientSupabase();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  if (!user) {
+    const origin = getOriginFromHeaders(h);
+    const nextAbs = `${origin}/nebula`;
+    const authUrl = new URL('https://auth.hempin.org/login');
+    authUrl.searchParams.set('next', nextAbs);
+    redirect(authUrl.toString());
+  }
+
+  // --- 2) Load snapshot (no cache; include cookies) ------------------------
   const origin = getOriginFromHeaders(h);
   const url = `${origin}/api/account/snapshot`;
 
   const res = await fetch(url, {
     method: 'GET',
-    // make sure we don’t cache, and pass cookies so the API can read the session
     cache: 'no-store',
-    headers: {
-      cookie: h.get('cookie') ?? '',
-    },
+    // forward cookies so the API can read the session
+    headers: { cookie: h.get('cookie') ?? '' },
   });
 
   if (!res.ok) {
-    // Surface a soft failure—NebulaClient can show a retry
+    // Soft failure: give the user a retry affordance
     return (
       <main className="min-h-screen grid place-items-center p-6">
         <div className="rounded-xl border border-white/10 bg-black/50 p-6 text-center">

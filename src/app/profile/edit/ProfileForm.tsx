@@ -1,3 +1,4 @@
+// src/app/profile/edit/ProfileForm.tsx
 'use client';
 
 import { useState } from 'react';
@@ -5,32 +6,48 @@ import { createClient } from '@/lib/supabase/client';
 
 export default function ProfileForm({ initial }: { initial: any }) {
   const supabase = createClient();
+
+  // store the STORAGE PATH in DB, and keep a preview URL locally
+  const [avatarPath, setAvatarPath] = useState<string | null>(initial.avatar_url ?? null);
+  const [avatarPreview, setAvatarPreview] = useState<string | null>(initial.avatar_url_preview ?? initial.avatar_url ?? null);
+
   const [displayName, setDisplayName] = useState(initial.display_name ?? '');
   const [handle, setHandle] = useState(initial.handle ?? '');
   const [publicEmail, setPublicEmail] = useState(initial.public_email ?? '');
   const [planetHue, setPlanetHue] = useState<number>(initial.planet_hue ?? 210);
   const [isPublic, setIsPublic] = useState<boolean>(!!initial.is_public);
-  const [avatarUrl, setAvatarUrl] = useState<string | null>(initial.avatar_url ?? null);
+
   const [saving, setSaving] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
 
   async function onUploadAvatar(file: File) {
     setErr(null); setMsg(null);
+
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) { setErr('Not signed in'); return; }
 
-    const ext = file.name.split('.').pop() || 'jpg';
+    // immediate local preview
+    const localUrl = URL.createObjectURL(file);
+    setAvatarPreview(localUrl);
+
+    // pick a stable path (no extension needed, but ok to keep)
+    const ext = (file.name.split('.').pop() || 'jpg').toLowerCase();
     const path = `${user.id}/avatar.${ext}`;
 
-    const { error: upErr } = await supabase.storage.from('avatars').upload(path, file, {
-      upsert: true,
-      contentType: file.type || 'image/jpeg',
-    });
+    const { error: upErr } = await supabase
+      .storage
+      .from('avatars')
+      .upload(path, file, { upsert: true, contentType: file.type || 'image/jpeg', cacheControl: '3600' });
+
     if (upErr) { setErr(upErr.message); return; }
 
+    // set storage path for DB write
+    setAvatarPath(path);
+
+    // get public URL for preview only
     const { data: pub } = supabase.storage.from('avatars').getPublicUrl(path);
-    setAvatarUrl(pub.publicUrl);
+    setAvatarPreview(pub?.publicUrl ?? localUrl);
   }
 
   async function onSave(e: React.FormEvent) {
@@ -46,12 +63,13 @@ export default function ProfileForm({ initial }: { initial: any }) {
         public_email: publicEmail,
         planet_hue: planetHue,
         is_public: isPublic,
-        avatar_url: avatarUrl,
+        // IMPORTANT: store the storage path, not the preview URL
+        avatar_url: avatarPath,
       }),
     });
 
     setSaving(false);
-    const payload = await res.json();
+    const payload = await res.json().catch(() => ({}));
     if (!res.ok) { setErr(payload.error || 'Save failed'); return; }
     setMsg('Saved!');
   }
@@ -60,7 +78,7 @@ export default function ProfileForm({ initial }: { initial: any }) {
     <form onSubmit={onSave} className="mt-5 space-y-4">
       <div className="flex items-center gap-4">
         <div className="h-20 w-20 rounded-full bg-white/10 overflow-hidden ring-1 ring-white/10">
-          {avatarUrl ? <img src={avatarUrl} alt="" className="h-full w-full object-cover" /> : null}
+          {avatarPreview ? <img src={avatarPreview} alt="" className="h-full w-full object-cover" /> : null}
         </div>
         <label className="text-sm">
           <span className="block mb-1 opacity-70">Avatar</span>
