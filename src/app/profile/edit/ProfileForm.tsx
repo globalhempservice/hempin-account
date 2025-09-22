@@ -4,12 +4,14 @@
 import { useState } from 'react';
 import { createClient } from '@/lib/supabase/client';
 
-export default function ProfileForm({ initial }: { initial: any }) {
+export default function ProfileForm({ initial = {} }: { initial?: any }) {
   const supabase = createClient();
 
   // store the STORAGE PATH in DB, and keep a preview URL locally
   const [avatarPath, setAvatarPath] = useState<string | null>(initial.avatar_url ?? null);
-  const [avatarPreview, setAvatarPreview] = useState<string | null>(initial.avatar_url_preview ?? initial.avatar_url ?? null);
+  const [avatarPreview, setAvatarPreview] = useState<string | null>(
+    initial.avatar_url_preview ?? initial.avatar_url ?? null
+  );
 
   const [displayName, setDisplayName] = useState(initial.display_name ?? '');
   const [handle, setHandle] = useState(initial.handle ?? '');
