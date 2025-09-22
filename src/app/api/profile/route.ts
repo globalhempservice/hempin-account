@@ -1,26 +1,41 @@
-// src/app/api/profile/route.ts
 import { NextResponse } from 'next/server'
 import { createServerClientSupabase } from '@/lib/supabase/server'
 
+function strOrNull(v: unknown) {
+  if (typeof v !== 'string') return null
+  const t = v.trim()
+  return t.length ? t : null
+}
+
 export async function POST(req: Request) {
   const supabase = createServerClientSupabase()
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) return NextResponse.json({ error: 'unauthorized' }, { status: 401 })
+  const { data: { user }, error: authErr } = await supabase.auth.getUser()
+  if (authErr || !user) return NextResponse.json({ error: 'unauthorized' }, { status: 401 })
 
-  const body = await req.json().catch(() => ({} as any))
-  const updates = {
-    display_name: body.display_name ?? null,
-    handle: body.handle ?? null,
-    public_email: body.public_email ?? null,
-    planet_hue: body.planet_hue ?? null,
-    is_public: body.is_public ?? null,
-    avatar_url: body.avatar_url ?? null,
+  const body = await req.json().catch(() => ({} as Record<string, unknown>))
+
+  // Build a sanitized payload — do NOT include `email` at all.
+  const updates: Record<string, unknown> = {
+    display_name: strOrNull(body.display_name),
+    handle:       strOrNull(body.handle),
+    public_email: strOrNull(body.public_email),
+    planet_hue:   typeof body.planet_hue === 'number' ? body.planet_hue : null,
+    is_public:    !!body.is_public,
+    avatar_url:   strOrNull(body.avatar_url), // storage path, not public URL
   }
 
-  const { error } = await supabase.from('profiles')
+  // Drop undefined keys so we don't overwrite with undefined
+  Object.keys(updates).forEach((k) => {
+    if (typeof updates[k] === 'undefined') delete updates[k]
+  })
+
+  const { error } = await supabase
+    .from('profiles')
     .update(updates)
     .eq('auth_user_id', user.id)
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 400 })
+  if (error) {
+    return NextResponse.json({ error: error.message }, { status: 400 })
+  }
   return NextResponse.json({ ok: true })
 }
