@@ -4,6 +4,7 @@ import {
   createServerClient as createSsrClient,
   type CookieOptions,
 } from '@supabase/ssr'
+import { createClient as createSbClient } from '@supabase/supabase-js'
 
 /**
  * We set cookies on the parent domain so ALL subdomains share the session.
@@ -51,6 +52,18 @@ export function createServerClientSupabase() {
       },
     },
   })
+}
+
+/**
+ * Safe admin client.
+ * - Returns `null` if URL or service role key not configured.
+ * - No throw at import time (so builds don’t crash).
+ */
+export function supabaseAdmin() {
+  const url = SUPABASE_URL
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY
+  if (!url || !key) return null
+  return createSbClient(url, key, { auth: { persistSession: false } })
 }
 
 // Back-compat alias for older imports
