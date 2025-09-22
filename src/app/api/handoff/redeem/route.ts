@@ -1,3 +1,4 @@
+// src/app/api/handoff/redeem/route.ts
 import { NextRequest, NextResponse } from 'next/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 
@@ -12,6 +13,13 @@ export async function GET(req: NextRequest) {
     }
 
     const db = createAdminClient()
+    if (!db) {
+      // Env not configured in this environment; don’t crash the build/runtime
+      return NextResponse.json(
+        { ok: false, error: 'Server misconfiguration (no service role key).' },
+        { status: 500 }
+      )
+    }
 
     // 1) Look up the handoff token
     const { data: ht, error: htErr } = await db
@@ -26,19 +34,13 @@ export async function GET(req: NextRequest) {
         { status: 400 }
       )
     }
-    if (!ht) {
-      return NextResponse.json({ ok: false, error: 'Token not found.' }, { status: 404 })
-    }
+    if (!ht) return NextResponse.json({ ok: false, error: 'Token not found.' }, { status: 404 })
     if (!ht.consumed_at && ht.expires_at && new Date(ht.expires_at) < new Date()) {
-      return NextResponse.json(
-        { ok: false, error: 'Token expired. Please start again.' },
-        { status: 410 }
-      )
+      return NextResponse.json({ ok: false, error: 'Token expired. Please start again.' }, { status: 410 })
     }
 
-    // 2) Compute a fresh Leaf XP total (prefer summing the ledger)
+    // 2) Compute fresh Leaf XP (prefer summing ledger)
     let leafTotal = ht.leaf_snapshot ?? 0
-
     if (ht.profile_id) {
       try {
         const { data: rows, error: lErr } = await db
@@ -47,7 +49,10 @@ export async function GET(req: NextRequest) {
           .eq('profile_id', ht.profile_id)
 
         if (!lErr && rows) {
-          leafTotal = rows.reduce((sum, r: { leaf_delta: number | null }) => sum + (r.leaf_delta ?? 0), 0)
+          leafTotal = rows.reduce(
+            (sum: number, r: { leaf_delta: number | null }) => sum + (r.leaf_delta ?? 0),
+            0
+          )
         } else {
           const { data: prof } = await db
             .from('profiles')
@@ -55,9 +60,7 @@ export async function GET(req: NextRequest) {
             .eq('id', ht.profile_id)
             .maybeSingle()
 
-          if (prof && typeof prof.leaf_total === 'number') {
-            leafTotal = prof.leaf_total
-          }
+          if (prof && typeof prof.leaf_total === 'number') leafTotal = prof.leaf_total
         }
       } catch {
         // keep snapshot value on failure
@@ -66,13 +69,10 @@ export async function GET(req: NextRequest) {
 
     // 3) Mark token consumed (best-effort)
     if (!ht.consumed_at) {
-      await db
-        .from('handoff_tokens')
-        .update({ consumed_at: new Date().toISOString() })
-        .eq('id', token)
+      await db.from('handoff_tokens').update({ consumed_at: new Date().toISOString() }).eq('id', token)
     }
 
-    // 4) Decide unlocks (example logic)
+    // 4) Decide unlocks
     const fundUnlocked = true
     const marketUnlocked = src === 'market'
 
@@ -85,9 +85,6 @@ export async function GET(req: NextRequest) {
       marketUnlocked,
     })
   } catch (e: any) {
-    return NextResponse.json(
-      { ok: false, error: e?.message ?? 'Server error' },
-      { status: 500 }
-    )
+    return NextResponse.json({ ok: false, error: e?.message ?? 'Server error' }, { status: 500 })
   }
 }
